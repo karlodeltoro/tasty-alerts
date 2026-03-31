@@ -343,6 +343,7 @@ class TastyAlertSystem:
             login=config.TT_USERNAME,
             password=config.TT_PASSWORD,
             remember_me=True,
+            remember_token=config.TT_REMEMBER_TOKEN,
         )
         # Serializar sesión nueva para próximos reinicios
         try:

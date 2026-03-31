@@ -21,8 +21,16 @@ def _require(key: str) -> str:
 # ── Tastytrade ────────────────────────────────────────────────
 TT_USERNAME       = _require("TT_USERNAME")
 TT_PASSWORD       = _require("TT_PASSWORD")
-# remember_token generado en el primer login con OTP — evita pedir OTP en reinicios
-TT_REMEMBER_TOKEN = os.getenv("TT_REMEMBER_TOKEN")  # opcional
+
+# ── Railway (para renovacion automatica de sesion) ────────────
+# RAILWAY_API_TOKEN:      railway.app → Account Settings → Tokens → Create Token
+# RAILWAY_PROJECT_ID:     railway.app → Project → Settings → General → Project ID
+# RAILWAY_SERVICE_ID:     railway.app → Project → Service → Settings → Service ID
+# RAILWAY_ENVIRONMENT_ID: railway.app → Project → Environments → (hover env) → Copy ID
+RAILWAY_API_TOKEN      = os.getenv("RAILWAY_API_TOKEN")
+RAILWAY_PROJECT_ID     = os.getenv("RAILWAY_PROJECT_ID")
+RAILWAY_SERVICE_ID     = os.getenv("RAILWAY_SERVICE_ID")
+RAILWAY_ENVIRONMENT_ID = os.getenv("RAILWAY_ENVIRONMENT_ID")
 
 # ── Telegram ──────────────────────────────────────────────────
 TELEGRAM_BOT_TOKEN = _require("TELEGRAM_BOT_TOKEN")

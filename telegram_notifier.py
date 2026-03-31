@@ -290,6 +290,43 @@ def send_stream_verification_message(symbols: list[str]) -> None:
         logger.error(f"Telegram verify msg error: {e}")
 
 
+def send_session_renewed(expiration: object, railway_updated: bool) -> None:
+    """Notifica renovacion exitosa de sesion Tastytrade."""
+    railway_str = "Railway actualizado" if railway_updated else "Railway NO actualizado — actualizar manualmente"
+    text = (
+        f"🔑 *Sesion Tastytrade renovada*\n"
+        f"Expira: {expiration}\n"
+        f"{railway_str}"
+    )
+    try:
+        httpx.post(
+            f"{_TELEGRAM_BASE}/sendMessage",
+            json={"chat_id": config.TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"},
+            timeout=10,
+        ).raise_for_status()
+    except httpx.HTTPError as e:
+        logger.error(f"Telegram session renewed msg error: {e}")
+
+
+def send_session_renewal_failed(error: str) -> None:
+    """Alerta de fallo en renovacion de sesion — accion manual requerida."""
+    text = (
+        f"❌ *Fallo renovacion sesion Tastytrade*\n"
+        f"Error: {error}\n\n"
+        f"Ejecuta manualmente desde Mac:\n"
+        f"`python renew_session.py`\n"
+        f"y actualiza TT_SESSION_JSON en Railway."
+    )
+    try:
+        httpx.post(
+            f"{_TELEGRAM_BASE}/sendMessage",
+            json={"chat_id": config.TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"},
+            timeout=10,
+        ).raise_for_status()
+    except httpx.HTTPError as e:
+        logger.error(f"Telegram session renewal failed msg error: {e}")
+
+
 def send_shutdown_message() -> None:
     """Notifica al apagar el sistema."""
     try:

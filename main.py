@@ -17,6 +17,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 import telegram_notifier as tg
 from tasty_stream import TastyAlertSystem
+import renew_session
 
 logging.basicConfig(
     level=logging.INFO,
@@ -46,8 +47,14 @@ async def main() -> None:
         minute=5,
         id="verify_stream",
     )
+    scheduler.add_job(
+        renew_session.renew,
+        trigger="interval",
+        hours=20,
+        id="renew_session",
+    )
     scheduler.start()
-    logger.info("Scheduler activo — switch 17:15 ET, verificación 18:05 ET")
+    logger.info("Scheduler activo — switch 17:15 ET, verificación 18:05 ET, renovación sesión cada 20h")
 
     loop = asyncio.get_running_loop()
 

@@ -68,14 +68,14 @@ def main():
 
     print(f"\nSesión guardada en {SESSION_FILE}")
     print(f"  Expira: {session.session_expiration}")
-    if session.remember_token:
-        print(f"  remember_token: {session.remember_token[:8]}...")
-        # Actualizar .env con el nuevo remember_token
-        from dotenv import set_key
-        env_path = os.path.join(os.path.dirname(__file__), ".env")
-        set_key(env_path, "TT_REMEMBER_TOKEN", session.remember_token)
-        print("  .env actualizado con nuevo remember_token")
 
+    # Base64 para Railway — copiar como variable TT_SESSION_JSON
+    import base64
+    session_b64 = base64.b64encode(serialized.encode()).decode()
+    print("\n── Railway ──────────────────────────────────────────────")
+    print("Copia esto como variable de entorno TT_SESSION_JSON en Railway:")
+    print(session_b64)
+    print("─────────────────────────────────────────────────────────")
     print("\nListo. Ahora puedes correr: python main.py")
 
 

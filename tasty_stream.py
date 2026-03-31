@@ -312,40 +312,53 @@ class TastyAlertSystem:
         """
         Crea y autentica la sesión (síncrono en v9).
         Prioridad:
-          1. session.json serializado (no requiere OTP, válido hasta expiración)
-          2. Password login (puede requerir OTP si es dispositivo nuevo)
+          1. TT_SESSION_JSON env var (base64) — Railway production
+          2. session.json local — dev / fallback
+          3. Password login — solo dispositivo conocido (Mac)
         """
+        import base64
         from datetime import datetime, timezone
-        session_file = os.path.join(os.path.dirname(__file__), "session.json")
 
-        # ── Intentar cargar sesión serializada ────────────────────
+        def _check_expiry(session: Session) -> bool:
+            """Devuelve True si la sesión aún es válida."""
+            exp = session.session_expiration
+            if exp.tzinfo is None:
+                exp = exp.replace(tzinfo=timezone.utc)
+            return datetime.now(timezone.utc) < exp
+
+        # ── 1. TT_SESSION_JSON (Railway) ──────────────────────────
+        session_b64 = os.getenv("TT_SESSION_JSON")
+        if session_b64:
+            try:
+                serialized = base64.b64decode(session_b64).decode()
+                session = Session.deserialize(serialized)
+                if _check_expiry(session):
+                    logger.info(f"Sesión cargada desde TT_SESSION_JSON (expira {session.session_expiration})")
+                    return session
+                logger.warning(f"TT_SESSION_JSON expirado ({session.session_expiration}), intentando session.json...")
+            except Exception as e:
+                logger.warning(f"Error leyendo TT_SESSION_JSON ({e}), intentando session.json...")
+
+        # ── 2. session.json local ─────────────────────────────────
+        session_file = os.path.join(os.path.dirname(__file__), "session.json")
         if os.path.exists(session_file):
             try:
                 with open(session_file) as f:
                     serialized = f.read()
                 session = Session.deserialize(serialized)
-                # Verificar que la sesión no esté expirada
-                now = datetime.now(timezone.utc)
-                exp = session.session_expiration
-                if exp.tzinfo is None:
-                    from datetime import timezone as tz
-                    exp = exp.replace(tzinfo=tz.utc)
-                if now < exp:
-                    logger.info(f"Sesión cargada desde {session_file} (expira {exp})")
+                if _check_expiry(session):
+                    logger.info(f"Sesión cargada desde {session_file} (expira {session.session_expiration})")
                     return session
-                else:
-                    logger.warning(f"session.json expirado ({exp}), reautenticando...")
+                logger.warning(f"session.json expirado ({session.session_expiration}), reautenticando...")
             except Exception as e:
                 logger.warning(f"Error leyendo session.json ({e}), reautenticando...")
 
-        # ── Login con password ─────────────────────────────────────
+        # ── 3. Password login (requiere dispositivo conocido) ──────
         session = Session(
             login=config.TT_USERNAME,
             password=config.TT_PASSWORD,
             remember_me=True,
-            remember_token=config.TT_REMEMBER_TOKEN,
         )
-        # Serializar sesión nueva para próximos reinicios
         try:
             with open(session_file, "w") as f:
                 f.write(session.serialize())

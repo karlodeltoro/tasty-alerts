@@ -60,26 +60,31 @@ def send_sweep_burst(
     sorted_contracts = sorted(contracts, key=lambda c: c["strike"])
     total_vol = sum(c["vol_1min"] for c in contracts)
     n = len(contracts)
-    cp = "C" if direction == "CALL" else "P"
+    cp  = "C" if direction == "CALL" else "P"
     dot = "🟢" if direction == "CALL" else "🔴"
     dte = (expiry_date - date.today()).days
-    title = f"\u25c6 SWEEP  /ES  {dot} {direction}  {total_vol} vol  {n} strikes"
+    exp_str = expiry_date.strftime("%-d %b %Y")
+    title = f"🌊 SWEEP  /ES  {dot} {direction}  {total_vol} vol  {n} strikes"
+    now_hms = datetime.now(_ET).strftime("%H:%M:%S")
+
+    def _side(bid, ask, price):
+        if price <= bid:   return "BID"
+        if price >= ask:   return "ASK"
+        return "MID"
 
     contract_lines = "\n".join(
-        f"{int(c['strike'])}{cp}   \u0394 {abs(c['delta']):.2f}   {c['vol_1min']} vol"
+        f"{int(c['strike'])}{cp}   \u0394 {abs(c['delta']):.2f}   {c['vol_1min']} vol   ${c.get('last_price', 0.0):.2f}  {_side(c['bid'], c['ask'], c.get('last_price', 0.0))}"
         for c in sorted_contracts
     )
 
     text = (
         f"*{title}*\n"
         f"\n"
-        f"{title}\n"
-        f"\n"
-        f"{dte} DTE\n"
+        f"{exp_str}  |  {dte} DTE\n"
         f"{_SEP}\n"
         f"{contract_lines}\n"
         f"{_SEP}\n"
-        f"ET  |  via Tastytrade"
+        f"{now_hms} ET  |  via Tastytrade"
     )
 
     ok = _post({"chat_id": config.TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}, "sweep burst")
@@ -94,31 +99,32 @@ def send_block_print(
     expiry_date: date,
     bid: float,
     ask: float,
-    last_price: float,
+    exec_price: float,
     delta: float,
     iv: float,
     vol_delta: int,
 ) -> bool:
     """Envía alerta de Block Print a Telegram. Retorna True si fue exitoso."""
-    dte    = (expiry_date - date.today()).days
-    iv_pct = int(round(iv * 100))
-    mark   = (bid + ask) / 2 if (bid + ask) > 0 else last_price
-    cp     = "C" if direction == "CALL" else "P"
-    dot    = "🟢" if direction == "CALL" else "🔴"
-    label  = f"{int(strike)}{dot}"
+    dte     = (expiry_date - date.today()).days
+    iv_pct  = int(round(iv * 100))
+    dot     = "🟢" if direction == "CALL" else "🔴"
+    label   = f"{int(strike)}{dot}"
+    exp_str = expiry_date.strftime("%-d %b %Y")
     now_hms = datetime.now(_ET).strftime("%H:%M:%S")
 
+    if exec_price <= bid:    side = "BID"
+    elif exec_price >= ask:  side = "ASK"
+    else:                    side = "MID"
+
     text = (
-        f"*\u25a3 BLOCK  {label}  /ES  {vol_delta} vol*\n"
+        f"*🖨️ BLOCK  {label}  {direction}  /ES  {vol_delta} vol*\n"
         f"\n"
-        f"{label}  /ES\n"
-        f"{dte} DTE\n"
-        f"Bid {bid:.2f}  Ask {ask:.2f}  Mark {mark:.2f}\n"
-        f"\u0394 {abs(delta):.2f}  IV {iv_pct}%\n"
+        f"{exp_str}  |  {dte} DTE  |  \u0394 {abs(delta):.2f}  |  IV {iv_pct}%\n"
         f"{_SEP}\n"
-        f"{now_hms}    {vol_delta} @ ${mark:.2f}\n"
+        f"Bid {bid:.2f}  |  Ask {ask:.2f}  |  Exec ${exec_price:.2f}\n"
         f"{_SEP}\n"
-        f"ET  |  via Tastytrade"
+        f"{vol_delta} contratos en el {side}\n"
+        f"{now_hms} ET  |  via Tastytrade"
     )
 
     ok = _post({"chat_id": config.TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}, "block print")
@@ -141,22 +147,24 @@ def send_pressure_cooker(
     tape: list,           # [(timestamp, size, price), ...]
 ) -> bool:
     """Envía alerta de Pressure Cooker a Telegram. Retorna True si fue exitoso."""
-    dte      = (expiry_date - date.today()).days
-    iv_pct   = int(round(iv * 100))
-    mark     = (bid + ask) / 2 if (bid + ask) > 0 else last_price
-    arrow    = "\u25b2" if direction == "CALL" else "\u25bc"
-    cp       = "C" if direction == "CALL" else "P"
-    dot      = "🟢" if direction == "CALL" else "🔴"
-    label    = f"{int(strike)}{dot}"
-    title    = f"{arrow} FLOW  {label}  /ES  {vol_accumulated} vol  {minutes}m"
+    dte     = (expiry_date - date.today()).days
+    iv_pct  = int(round(iv * 100))
+    dot     = "🟢" if direction == "CALL" else "🔴"
+    label   = f"{int(strike)}{dot}"
+    exp_str = expiry_date.strftime("%-d %b %Y")
+    now_hms = datetime.now(_ET).strftime("%H:%M:%S")
+    title   = f"🔥 FLOW  {label}  /ES  {vol_accumulated} vol  {minutes}m"
+
+    def _side(price):
+        if price <= bid:   return "BID"
+        if price >= ask:   return "ASK"
+        return "MID"
 
     # Tape — últimas 10 transacciones
-    tape_lines = ""
     if tape:
-        shown = tape[-10:]
         tape_lines = "\n".join(
-            f"{ts.strftime('%H:%M:%S')}    {size} @ ${price:.2f}"
-            for ts, size, price in shown
+            f"{ts.strftime('%H:%M:%S')}    {size} @ ${price:.2f}  {_side(price)}"
+            for ts, size, price in tape[-10:]
         )
     else:
         tape_lines = "Sin datos de tape"
@@ -164,16 +172,13 @@ def send_pressure_cooker(
     text = (
         f"*{title}*\n"
         f"\n"
-        f"{label}  /ES\n"
-        f"{dte} DTE\n"
-        f"Bid {bid:.2f}  Ask {ask:.2f}  Mark {mark:.2f}\n"
-        f"\u0394 {abs(delta):.2f}  IV {iv_pct}%\n"
+        f"{exp_str}  |  {dte} DTE  |  \u0394 {abs(delta):.2f}  |  IV {iv_pct}%\n"
         f"{_SEP}\n"
         f"Tape  {minutes}m\n"
         f"{tape_lines}\n"
         f"{_SEP}\n"
         f"Total  {vol_accumulated} contratos\n"
-        f"ET  |  via Tastytrade"
+        f"{now_hms} ET  |  via Tastytrade"
     )
 
     ok = _post({"chat_id": config.TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}, f"pressure cooker {minutes}min")

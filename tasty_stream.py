@@ -183,7 +183,9 @@ class TastyAlertSystem:
             if mark > 0 and mark < config.MIN_CONTRACT_PRICE:
                 continue
 
-            result = self.tracker.add_trade(sym, int(size), mark)
+            trade_price = float(trade.price) if trade.price else mark
+            meta['last_trade_price'] = trade_price
+            result = self.tracker.add_trade(sym, int(size), trade_price)
             if not result:
                 continue
 
@@ -254,15 +256,16 @@ class TastyAlertSystem:
         tg.send_raw_alert(direction, strike, expiry, vol_1min, mark)
 
     async def _send_block_print(self, symbol: str, vol_delta: int) -> None:
-        meta      = self._contract_meta.get(symbol, {})
-        direction = 'CALL' if meta.get('is_call') else 'PUT'
-        bid, ask  = meta.get('bid', 0.0), meta.get('ask', 0.0)
-        mark      = (bid + ask) / 2.0 if (bid + ask) > 0 else 0.0
-        delta     = self.tracker.get_all_meta().get(symbol, {}).get('delta', 0.0)
+        meta       = self._contract_meta.get(symbol, {})
+        direction  = 'CALL' if meta.get('is_call') else 'PUT'
+        bid, ask   = meta.get('bid', 0.0), meta.get('ask', 0.0)
+        mark       = (bid + ask) / 2.0 if (bid + ask) > 0 else 0.0
+        exec_price = meta.get('last_trade_price', mark)
+        delta      = self.tracker.get_all_meta().get(symbol, {}).get('delta', 0.0)
         tg.send_block_print(
             direction=direction, strike=meta.get('strike', 0.0),
             expiry_date=meta.get('expiry_date', date.today()),
-            bid=bid, ask=ask, last_price=mark, delta=delta,
+            bid=bid, ask=ask, exec_price=exec_price, delta=delta,
             iv=meta.get('iv', 0.0), vol_delta=vol_delta,
         )
 
@@ -271,12 +274,16 @@ class TastyAlertSystem:
         contracts, expiry_date = [], None
         for sym, vol_1min in group:
             meta = self._contract_meta.get(sym, {})
+            bid = meta.get('bid', 0.0)
+            ask = meta.get('ask', 0.0)
+            last_price = meta.get('last_trade_price', (bid + ask) / 2.0 if (bid + ask) > 0 else 0.0)
             contracts.append({
                 'strike':      meta.get('strike', 0),
                 'vol_1min':    vol_1min,
                 'delta':       tracker_meta.get(sym, {}).get('delta', 0.0),
-                'bid':         meta.get('bid', 0.0),
-                'ask':         meta.get('ask', 0.0),
+                'bid':         bid,
+                'ask':         ask,
+                'last_price':  last_price,
                 'expiry_date': meta.get('expiry_date'),
             })
             if expiry_date is None:

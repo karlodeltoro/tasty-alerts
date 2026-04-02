@@ -8,9 +8,12 @@ Producción:
   caffeinate -i python main.py >> alerts.log 2>&1 &
 """
 import asyncio
+import base64
+import json
 import logging
 import signal
 import sys
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -27,6 +30,33 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 ET = ZoneInfo("America/New_York")
+
+
+def _expiry_watchdog() -> None:
+    """Renueva la sesión si expira en menos de 10h."""
+    import os
+    session_b64 = os.getenv("TT_SESSION_JSON", "")
+    if not session_b64:
+        return
+    try:
+        data = json.loads(base64.b64decode(session_b64).decode())
+        exp_str = (
+            data.get("session-expiration")
+            or data.get("session_expiration")
+            or data.get("expiration")
+        )
+        if not exp_str:
+            logger.warning("expiry_watchdog: no se encontró fecha de expiración en TT_SESSION_JSON")
+            return
+        exp = datetime.fromisoformat(str(exp_str).replace("Z", "+00:00"))
+        remaining = exp - datetime.now(timezone.utc)
+        if remaining < timedelta(hours=10):
+            logger.warning(f"expiry_watchdog: sesión expira en {remaining} — renovando anticipadamente...")
+            renew_session.renew()
+        else:
+            logger.info(f"expiry_watchdog: sesión OK, expira en {remaining}")
+    except Exception as e:
+        logger.error(f"expiry_watchdog error: {e}")
 
 
 async def main() -> None:
@@ -50,11 +80,17 @@ async def main() -> None:
     scheduler.add_job(
         renew_session.renew,
         trigger="interval",
-        hours=18,
+        hours=8,
         id="renew_session",
     )
+    scheduler.add_job(
+        _expiry_watchdog,
+        trigger="interval",
+        hours=1,
+        id="expiry_watchdog",
+    )
     scheduler.start()
-    logger.info("Scheduler activo — switch 17:15 ET, verificación 18:05 ET, renovación sesión cada 18h")
+    logger.info("Scheduler activo — switch 17:15 ET, verificación 18:05 ET, renovación sesión cada 8h, watchdog expiración cada 1h")
 
     loop = asyncio.get_running_loop()
     _stop = asyncio.Event()
@@ -82,6 +118,12 @@ async def main() -> None:
 
         if _stop.is_set():
             break
+
+        logger.info("Renovando sesión antes de reconectar...")
+        try:
+            renew_session.renew()
+        except Exception as re_err:
+            logger.error(f"Fallo al renovar sesión pre-reconexión: {re_err}")
 
         logger.info(f"Reconectando en {retry_delay}s...")
         try:

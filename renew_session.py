@@ -135,7 +135,10 @@ def renew() -> bool:
     railway_ok = _update_railway(new_b64)
     exp = session.session_expiration
     logger.info(f"Sesion renovada. Expira: {exp}. Railway actualizado: {railway_ok}")
-    tg.send_session_renewed(exp, railway_ok)
+    if railway_ok:
+        tg.send_session_renewed(exp, railway_ok)
+    else:
+        tg.send_session_json_manual_update(new_b64, exp)
     return True
 
 

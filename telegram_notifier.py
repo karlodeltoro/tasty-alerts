@@ -341,3 +341,28 @@ def send_shutdown_message() -> None:
         ).raise_for_status()
     except httpx.HTTPError:
         pass
+
+
+def send_session_json_manual_update(new_b64: str, expiration: object) -> None:
+    """Cuando Railway no se actualiza automáticamente, envía el base64 por Telegram en chunks."""
+    warning_text = (
+        f"⚠️ *Railway NO actualizado — acción requerida*\n"
+        f"Sesión renovada en memoria. Expira: {expiration}\n\n"
+        f"Copia el valor del siguiente mensaje y pégalo en\n"
+        f"Railway → Variables → TT_SESSION_JSON → Redeploy"
+    )
+    try:
+        httpx.post(f"{_TELEGRAM_BASE}/sendMessage",
+            json={"chat_id": config.TELEGRAM_CHAT_ID, "text": warning_text, "parse_mode": "Markdown"},
+            timeout=10).raise_for_status()
+    except Exception as e:
+        logger.error(f"Telegram manual update warning error: {e}")
+    for idx, chunk in enumerate([new_b64[i:i+3800] for i in range(0, len(new_b64), 3800)], 1):
+        try:
+            httpx.post(f"{_TELEGRAM_BASE}/sendMessage",
+                json={"chat_id": config.TELEGRAM_CHAT_ID,
+                      "text": f"TT_SESSION_JSON:\n\n`{chunk}`",
+                      "parse_mode": "Markdown"},
+                timeout=10).raise_for_status()
+        except Exception as e:
+            logger.error(f"Telegram session_json chunk {idx} error: {e}")

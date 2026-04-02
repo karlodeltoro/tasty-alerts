@@ -406,7 +406,19 @@ class TastyAlertSystem:
                 if _check_expiry(session):
                     logger.info(f"Sesión cargada desde TT_SESSION_JSON (expira {session.session_expiration})")
                     return session
-                logger.warning(f"TT_SESSION_JSON expirado ({session.session_expiration}), intentando session.json...")
+                # Sesión expirada — auto-renovar con remember_token antes de rendirse
+                logger.warning(
+                    f"TT_SESSION_JSON expirado ({session.session_expiration}) "
+                    "— intentando auto-renovación con remember_token..."
+                )
+                import renew_session as _rs
+                if _rs.renew():
+                    new_b64 = os.getenv("TT_SESSION_JSON")
+                    new_session = Session.deserialize(base64.b64decode(new_b64).decode())
+                    if _check_expiry(new_session):
+                        logger.info(f"Auto-renovación exitosa (expira {new_session.session_expiration})")
+                        return new_session
+                logger.warning("Auto-renovación fallida, intentando session.json...")
             except Exception as e:
                 logger.warning(f"Error leyendo TT_SESSION_JSON ({e}), intentando session.json...")
 

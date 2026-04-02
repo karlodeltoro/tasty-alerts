@@ -50,25 +50,45 @@ async def main() -> None:
     scheduler.add_job(
         renew_session.renew,
         trigger="interval",
-        hours=20,
+        hours=18,
         id="renew_session",
     )
     scheduler.start()
-    logger.info("Scheduler activo — switch 17:15 ET, verificación 18:05 ET, renovación sesión cada 20h")
+    logger.info("Scheduler activo — switch 17:15 ET, verificación 18:05 ET, renovación sesión cada 18h")
 
     loop = asyncio.get_running_loop()
+    _stop = asyncio.Event()
 
     def _shutdown(sig_name: str) -> None:
         logger.info(f"Señal {sig_name} recibida. Cerrando...")
         tg.send_shutdown_message()
         scheduler.shutdown(wait=False)
-        loop.stop()
+        _stop.set()
 
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, _shutdown, sig.name)
 
     logger.info("Iniciando sesión de alertas Tastytrade...")
-    await system.run_session()
+    retry_delay = 30
+    while not _stop.is_set():
+        try:
+            await system.run_session()
+            # run_session() terminó sin excepción (no debería ocurrir)
+            logger.warning("run_session() terminó sin error inesperadamente.")
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"Sesión terminada con error: {e}")
+
+        if _stop.is_set():
+            break
+
+        logger.info(f"Reconectando en {retry_delay}s...")
+        try:
+            await asyncio.wait_for(_stop.wait(), timeout=retry_delay)
+        except asyncio.TimeoutError:
+            pass
+        retry_delay = min(retry_delay * 2, 300)
 
 
 if __name__ == "__main__":

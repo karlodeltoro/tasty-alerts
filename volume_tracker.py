@@ -27,14 +27,16 @@ class TrackResult:
     vol_delta: int          # contratos en este trade
     vol_1min: int           # total acumulado en 60s
     vol_5min: int           # total acumulado en 300s
+    vol_1min_ask: int = 0   # volumen en 60s ejecutado en el ask (price >= ask)
 
 
 class VolumeTracker:
     def __init__(self) -> None:
         self._last_total: dict[str, int] = {}
-        self._q1: dict[str, deque] = defaultdict(deque)
-        self._q5: dict[str, deque] = defaultdict(deque)
-        self._meta: dict[str, dict] = {}
+        self._q1:     dict[str, deque] = defaultdict(deque)
+        self._q5:     dict[str, deque] = defaultdict(deque)
+        self._q1_ask: dict[str, deque] = defaultdict(deque)  # solo trades en el ask
+        self._meta:   dict[str, dict]  = {}
 
     def register(self, symbol: str, underlying: str, contract_type: str, delta: float) -> None:
         """Registra un símbolo con su metadata antes de empezar a rastrear."""
@@ -44,11 +46,14 @@ class VolumeTracker:
             "delta": delta,
         }
 
-    def add_trade(self, symbol: str, size: int, price: float = 0.0) -> TrackResult | None:
+    def add_trade(
+        self, symbol: str, size: int, price: float = 0.0, is_ask: bool = False
+    ) -> TrackResult | None:
         """
         Registra un trade individual del WebSocket (event-driven).
         A diferencia de update(), no calcula delta vs total — recibe el tamaño
         real del trade directamente del exchange.
+        is_ask=True cuando trade.price >= ask del contrato en ese momento.
         """
         if symbol not in self._meta:
             return None
@@ -59,11 +64,14 @@ class VolumeTracker:
         event = (now, size, price)
         self._q1[symbol].append(event)
         self._q5[symbol].append(event)
+        if is_ask:
+            self._q1_ask[symbol].append(event)
 
         cutoff1 = now - timedelta(seconds=60)
         cutoff5 = now - timedelta(seconds=300)
         _trim(self._q1[symbol], cutoff1)
         _trim(self._q5[symbol], cutoff5)
+        _trim(self._q1_ask[symbol], cutoff1)
 
         meta = self._meta[symbol]
         return TrackResult(
@@ -74,6 +82,7 @@ class VolumeTracker:
             vol_delta=size,
             vol_1min=sum(e[1] for e in self._q1[symbol]),
             vol_5min=sum(e[1] for e in self._q5[symbol]),
+            vol_1min_ask=sum(e[1] for e in self._q1_ask[symbol]),
         )
 
     def update(self, symbol: str, total_volume: int) -> TrackResult | None:
@@ -127,6 +136,16 @@ class VolumeTracker:
         _trim(q, cutoff)
         return sum(e[1] for e in q)
 
+    def get_ask_vol_1min(self, symbol: str) -> int:
+        """Volumen de los últimos 60s ejecutado en el ask (price >= ask)."""
+        now = datetime.now()
+        cutoff = now - timedelta(seconds=60)
+        q = self._q1_ask.get(symbol)
+        if not q:
+            return 0
+        _trim(q, cutoff)
+        return sum(e[1] for e in q)
+
     def get_vol_window(self, symbol: str, seconds: int) -> int:
         now = datetime.now()
         cutoff = now - timedelta(seconds=seconds)
@@ -156,6 +175,7 @@ class VolumeTracker:
         self._last_total.clear()
         self._q1.clear()
         self._q5.clear()
+        self._q1_ask.clear()
         self._meta.clear()
 
 

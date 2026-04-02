@@ -226,7 +226,8 @@ class TastyAlertSystem:
 
             trade_price = float(trade.price) if trade.price else mark
             meta['last_trade_price'] = trade_price
-            result = self.tracker.add_trade(sym, int(size), trade_price)
+            is_ask = ask > 0 and trade_price >= ask
+            result = self.tracker.add_trade(sym, int(size), trade_price, is_ask=is_ask)
             if not result:
                 continue
 
@@ -298,8 +299,9 @@ class TastyAlertSystem:
             if config.RAW_ALERT_MODE:
                 continue
 
-            vol_snapshot = {sym: self.tracker.get_vol_1min(sym) for sym in self._active_symbols}
-            burst = self.engine.check(vol_snapshot, self.tracker.get_all_meta())
+            vol_snapshot     = {sym: self.tracker.get_vol_1min(sym)     for sym in self._active_symbols}
+            ask_vol_snapshot = {sym: self.tracker.get_ask_vol_1min(sym) for sym in self._active_symbols}
+            burst = self.engine.check(vol_snapshot, self.tracker.get_all_meta(), ask_vol_snapshot)
             if burst:
                 direction, group = burst
                 asyncio.create_task(self._send_sweep_burst(direction, group))

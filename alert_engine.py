@@ -24,16 +24,23 @@ class SweepBurstEngine:
 
     def check(
         self,
-        vol_snapshot: dict[str, int],   # symbol → vol acumulado en ventana 60s
-        tracker_meta: dict[str, dict],  # symbol → {underlying, contract_type, delta}
+        vol_snapshot: dict[str, int],      # symbol → vol total acumulado en 60s
+        tracker_meta: dict[str, dict],     # symbol → {underlying, contract_type, delta}
+        ask_vol_snapshot: dict[str, int] | None = None,  # symbol → vol en ask en 60s
     ) -> tuple[str, list[tuple[str, int]]] | None:
         """
         Evalúa si se cumple la condición de Sweep Burst.
         Retorna (direction, [(symbol, vol), ...]) ordenado por vol desc, o None.
+
+        Condición A: ≥ SWEEP_BURST_MIN_CONTRACTS contratos con vol_total ≥ SWEEP_BURST_MIN_VOL
+        Condición B: ≥ SWEEP_BURST_MIN_CONTRACTS_B contratos con ask_vol ≥ SWEEP_BURST_MIN_VOL_B
+                     (solo cuenta volumen ejecutado en el ask; requiere ask_vol_snapshot)
         """
+        _ask = ask_vol_snapshot or {}
+
         # Separar contratos elegibles por dirección para cada condición
-        # Condición A: ≥ SWEEP_BURST_MIN_VOL (50)
-        # Condición B: ≥ SWEEP_BURST_MIN_VOL_B (75)
+        # Condición A: vol total ≥ SWEEP_BURST_MIN_VOL (50)
+        # Condición B: vol en ask ≥ SWEEP_BURST_MIN_VOL_B (50)
         calls_a: list[tuple[str, int]] = []
         puts_a:  list[tuple[str, int]] = []
         calls_b: list[tuple[str, int]] = []
@@ -46,16 +53,17 @@ class SweepBurstEngine:
             if abs(meta.get('delta', 0.0)) < config.MIN_DELTA:
                 continue
             ct = meta.get('contract_type')
+            ask_vol = _ask.get(sym, 0)
             if ct == 'CALL':
                 if vol >= config.SWEEP_BURST_MIN_VOL:
                     calls_a.append((sym, vol))
-                if vol >= config.SWEEP_BURST_MIN_VOL_B:
-                    calls_b.append((sym, vol))
+                if ask_vol >= config.SWEEP_BURST_MIN_VOL_B:
+                    calls_b.append((sym, ask_vol))
             elif ct == 'PUT':
                 if vol >= config.SWEEP_BURST_MIN_VOL:
                     puts_a.append((sym, vol))
-                if vol >= config.SWEEP_BURST_MIN_VOL_B:
-                    puts_b.append((sym, vol))
+                if ask_vol >= config.SWEEP_BURST_MIN_VOL_B:
+                    puts_b.append((sym, ask_vol))
 
         for direction, group_a, group_b in [
             ('CALL', calls_a, calls_b),

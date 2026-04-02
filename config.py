@@ -54,6 +54,11 @@ BLOCK_PRINT_MIN_VOL          = int(os.getenv("BLOCK_PRINT_MIN_VOL", "100"))
 BLOCK_PRINT_MIN_DELTA        = float(os.getenv("BLOCK_PRINT_MIN_DELTA", "0.40"))
 BLOCK_PRINT_MAX_DELTA        = float(os.getenv("BLOCK_PRINT_MAX_DELTA", "0.90"))
 BLOCK_PRINT_COOLDOWN_SECONDS = int(os.getenv("BLOCK_PRINT_COOLDOWN_SECONDS", "120"))
+# Horario dual: mercado (9:01–17:59 ET) vs fuera de mercado (18:00–9:00 ET)
+BLOCK_PRINT_MARKET_MIN_VOL        = int(os.getenv("BLOCK_PRINT_MARKET_MIN_VOL", "150"))
+BLOCK_PRINT_MARKET_MIN_DELTA      = float(os.getenv("BLOCK_PRINT_MARKET_MIN_DELTA", "0.40"))
+BLOCK_PRINT_AFTER_HOURS_MIN_VOL   = int(os.getenv("BLOCK_PRINT_AFTER_HOURS_MIN_VOL", "100"))
+BLOCK_PRINT_AFTER_HOURS_MIN_DELTA = float(os.getenv("BLOCK_PRINT_AFTER_HOURS_MIN_DELTA", "0.30"))
 
 # ── Pressure Cooker ───────────────────────────────────────────
 PRESSURE_COOKER_2MIN_VOL         = int(os.getenv("PRESSURE_COOKER_2MIN_VOL", "250"))

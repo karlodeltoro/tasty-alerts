@@ -10,6 +10,7 @@ Cooldown: la misma dirección no puede disparar durante ALERT_COOLDOWN_SECONDS.
 import logging
 from collections import defaultdict, deque
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import config
 
@@ -201,6 +202,17 @@ class BlockPrintEngine:
         while q and q[0][0] < cutoff:
             q.popleft()
 
+    def _get_schedule_thresholds(self) -> tuple[int, float]:
+        """Retorna (min_vol, min_delta) según horario ET actual."""
+        et = datetime.now(ZoneInfo("America/New_York"))
+        t = et.time()
+        from datetime import time as _time
+        market_open  = _time(9,  1)
+        market_close = _time(17, 59, 59)
+        if market_open <= t <= market_close:
+            return config.BLOCK_PRINT_MARKET_MIN_VOL, config.BLOCK_PRINT_MARKET_MIN_DELTA
+        return config.BLOCK_PRINT_AFTER_HOURS_MIN_VOL, config.BLOCK_PRINT_AFTER_HOURS_MIN_DELTA
+
     def check(
         self,
         symbol: str,
@@ -210,8 +222,13 @@ class BlockPrintEngine:
         """
         Evalúa si se cumplen las condiciones de disparo.
         Retorna True si dispara (no resetea el acumulador, solo avanza el umbral).
+
+        Horario dual (America/New_York):
+          - Mercado (9:01–17:59): min_vol=150, min_delta=0.40
+          - Fuera de mercado (18:00–9:00): min_vol=100, min_delta=0.30
         """
-        effective_min_delta = min_delta if min_delta is not None else config.BLOCK_PRINT_MIN_DELTA
+        sched_min_vol, sched_min_delta = self._get_schedule_thresholds()
+        effective_min_delta = min_delta if min_delta is not None else sched_min_delta
         abs_delta = abs(delta)
         if abs_delta < effective_min_delta or abs_delta > config.BLOCK_PRINT_MAX_DELTA:
             return False
@@ -223,12 +240,12 @@ class BlockPrintEngine:
         q = self._events.get(key)
         vol_1min = sum(v for ts, v in q if ts >= cutoff) if q else 0
 
-        if vol_1min < config.BLOCK_PRINT_MIN_VOL:
+        if vol_1min < sched_min_vol:
             return False
 
-        # cum_vol debe superar el último umbral disparado + 100
+        # cum_vol debe superar el último umbral disparado + sched_min_vol
         cum = self._cum_vol.get(key, 0)
-        next_threshold = self._last_fired_vol.get(key, 0) + config.BLOCK_PRINT_MIN_VOL
+        next_threshold = self._last_fired_vol.get(key, 0) + sched_min_vol
         if cum < next_threshold:
             return False
 

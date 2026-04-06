@@ -33,8 +33,9 @@ RAILWAY_SERVICE_ID     = os.getenv("RAILWAY_SERVICE_ID")
 RAILWAY_ENVIRONMENT_ID = os.getenv("RAILWAY_ENVIRONMENT_ID")
 
 # ── Telegram ──────────────────────────────────────────────────
-TELEGRAM_BOT_TOKEN = _require("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID   = _require("TELEGRAM_CHAT_ID")
+TELEGRAM_BOT_TOKEN      = _require("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID        = _require("TELEGRAM_CHAT_ID")
+TELEGRAM_PRIVATE_CHAT_ID = os.getenv("TELEGRAM_PRIVATE_CHAT_ID", "")
 
 # ── Sweep Burst ───────────────────────────────────────────────
 SWEEP_BURST_WINDOW_SECONDS  = int(os.getenv("SWEEP_BURST_WINDOW_SECONDS", "60"))

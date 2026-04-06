@@ -23,6 +23,15 @@ _MAX_RETRIES = 3
 _RETRY_DELAY = 2  # segundos entre reintentos
 
 
+def _post_private(payload: dict, label: str) -> bool:
+    """Igual a _post() pero envía al chat privado (TELEGRAM_PRIVATE_CHAT_ID)."""
+    if not config.TELEGRAM_PRIVATE_CHAT_ID:
+        logger.warning(f"TELEGRAM_PRIVATE_CHAT_ID no configurado — mensaje '{label}' no enviado")
+        return False
+    payload = {**payload, "chat_id": config.TELEGRAM_PRIVATE_CHAT_ID}
+    return _post(payload, label)
+
+
 def _post(payload: dict, label: str) -> bool:
     """Envía un mensaje a Telegram con reintentos automáticos."""
     for attempt in range(1, _MAX_RETRIES + 1):
@@ -49,6 +58,14 @@ def _fmt_exp(expiry_date: date) -> str:
 
 def _now_et() -> str:
     return datetime.now(_ET).strftime("%H:%M:%S") + " ET"
+
+
+def send_message(text: str) -> bool:
+    """Envía un mensaje de texto libre a Telegram."""
+    return _post(
+        {"chat_id": config.TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"},
+        "send_message",
+    )
 
 
 def send_sweep_burst(
@@ -84,7 +101,7 @@ def send_sweep_burst(
         f"{_SEP}\n"
         f"{contract_lines}\n"
         f"{_SEP}\n"
-        f"{now_hms} ET  |  via Tastytrade"
+        f"{now_hms} ET  |  via BullCore"
     )
 
     ok = _post({"chat_id": config.TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}, "sweep burst")
@@ -124,7 +141,7 @@ def send_block_print(
         f"Bid {bid:.2f}  |  Ask {ask:.2f}  |  Exec ${exec_price:.2f}\n"
         f"{_SEP}\n"
         f"{vol_delta} contratos en el {side}\n"
-        f"{now_hms} ET  |  via Tastytrade"
+        f"{now_hms} ET  |  via BullCore"
     )
 
     ok = _post({"chat_id": config.TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}, "block print")
@@ -178,7 +195,7 @@ def send_pressure_cooker(
         f"{tape_lines}\n"
         f"{_SEP}\n"
         f"Total  {vol_accumulated} contratos\n"
-        f"{now_hms} ET  |  via Tastytrade"
+        f"{now_hms} ET  |  via BullCore"
     )
 
     ok = _post({"chat_id": config.TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}, f"pressure cooker {minutes}min")
@@ -202,7 +219,7 @@ def send_raw_alert(
         f"Strike: {int(strike)}  |  Exp: {_fmt_exp(expiry_date)}  |  {dte} DTE\n"
         f"Mark: ${mark:.2f}\n"
         f"{_SEP}\n"
-        f"{_now_et()}  |  via Tastytrade"
+        f"{_now_et()}  |  via BullCore"
     )
     ok = _post({"chat_id": config.TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}, "raw")
     if ok:
@@ -226,15 +243,6 @@ def send_startup_message(symbol_count: int, expiry_date: date | None) -> None:
         f"{_SEP_THICK}\n"
         f"📡 Monitoreando: *{symbol_count}* contratos {underlying}\n"
         f"📅 Expiración activa: {exp_str} ({dte} DTE)\n"
-        f"🔺 Delta mínimo: ≥{config.MIN_DELTA}\n"
-        f"\n"
-        f"🎯 *Filtros activos:*\n"
-        f"🌊 Sweep Burst — {config.SWEEP_BURST_MIN_CONTRACTS}+ contratos "
-        f"≥{config.SWEEP_BURST_MIN_VOL} vol en 60s\n"
-        f"🖨️ Block Print — 1 transacción ≥{config.BLOCK_PRINT_MIN_VOL} contratos\n"
-        f"🔥 Pressure Cooker — "
-        f"≥{config.PRESSURE_COOKER_2MIN_VOL} vol/2min · "
-        f"≥{config.PRESSURE_COOKER_5MIN_VOL} vol/5min\n"
         f"\n"
         f"{_SEP_THICK}\n"
         f"⏰ Inicio: {now_str}"
@@ -291,25 +299,18 @@ def send_stream_verification_message(symbols: list[str]) -> None:
 
 
 def send_session_renewed(expiration: object, railway_updated: bool) -> None:
-    """Notifica renovacion exitosa de sesion Tastytrade."""
+    """Notifica renovacion exitosa de sesion — va al chat privado."""
     railway_str = "Railway actualizado" if railway_updated else "Railway NO actualizado — actualizar manualmente"
     text = (
         f"🔑 *Sesion Tastytrade renovada*\n"
         f"Expira: {expiration}\n"
         f"{railway_str}"
     )
-    try:
-        httpx.post(
-            f"{_TELEGRAM_BASE}/sendMessage",
-            json={"chat_id": config.TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"},
-            timeout=10,
-        ).raise_for_status()
-    except httpx.HTTPError as e:
-        logger.error(f"Telegram session renewed msg error: {e}")
+    _post_private({"chat_id": "", "text": text, "parse_mode": "Markdown"}, "session renewed")
 
 
 def send_session_renewal_failed(error: str) -> None:
-    """Alerta de fallo en renovacion de sesion — accion manual requerida."""
+    """Alerta de fallo en renovacion de sesion — va al chat privado."""
     text = (
         f"❌ *Fallo renovacion sesion Tastytrade*\n"
         f"Error: {error}\n\n"
@@ -317,30 +318,15 @@ def send_session_renewal_failed(error: str) -> None:
         f"`python renew_session.py`\n"
         f"y actualiza TT_SESSION_JSON en Railway."
     )
-    try:
-        httpx.post(
-            f"{_TELEGRAM_BASE}/sendMessage",
-            json={"chat_id": config.TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"},
-            timeout=10,
-        ).raise_for_status()
-    except httpx.HTTPError as e:
-        logger.error(f"Telegram session renewal failed msg error: {e}")
+    _post_private({"chat_id": "", "text": text, "parse_mode": "Markdown"}, "session renewal failed")
 
 
 def send_shutdown_message() -> None:
-    """Notifica al apagar el sistema."""
-    try:
-        httpx.post(
-            f"{_TELEGRAM_BASE}/sendMessage",
-            json={
-                "chat_id": config.TELEGRAM_CHAT_ID,
-                "text": "⛔ *Sistema de alertas detenido*",
-                "parse_mode": "Markdown",
-            },
-            timeout=10,
-        ).raise_for_status()
-    except httpx.HTTPError:
-        pass
+    """Notifica al apagar el sistema — va al chat privado."""
+    _post_private(
+        {"chat_id": "", "text": "⛔ *Sistema de alertas detenido*", "parse_mode": "Markdown"},
+        "shutdown",
+    )
 
 
 def send_session_json_manual_update(new_b64: str, expiration: object) -> None:

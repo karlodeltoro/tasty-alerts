@@ -81,14 +81,9 @@ Cada 20 horas
 
 Detecta ráfagas coordinadas: múltiples strikes de la **misma dirección** con volumen elevado en una ventana de 60 segundos. Señal de institucional distribuyendo en varios strikes simultáneamente.
 
-**Condición A** (amplitud normal):
-- ≥ `SWEEP_BURST_MIN_CONTRACTS` = **5** contratos distintos
-- Cada uno con ≥ `SWEEP_BURST_MIN_VOL` = **50** contratos vol en 60s
-- `|delta|` ≥ `MIN_DELTA` = **0.30**
-
-**Condición B** (amplitud reducida, vol alto):
+**Condición de disparo:**
 - ≥ `SWEEP_BURST_MIN_CONTRACTS_B` = **3** contratos distintos
-- Cada uno con ≥ `SWEEP_BURST_MIN_VOL_B` = **75** contratos vol en 60s
+- Cada uno con ≥ `SWEEP_BURST_MIN_VOL_B` = **50** contratos vol en ask en 60s
 - `|delta|` ≥ `MIN_DELTA` = **0.30**
 
 **Cooldown:** `ALERT_COOLDOWN_SECONDS` = **120s** por dirección (CALL/PUT independiente).
@@ -99,12 +94,12 @@ Detecta ráfagas coordinadas: múltiples strikes de la **misma dirección** con 
 
 ### 2. Block Print `🖨️`
 
-Detecta acumulación de volumen en un **único contrato** — señal de una sola entidad tomando posición grande.
+Detecta una única transacción ≥ umbral en el T&S. No acumula — una orden, un disparo.
 
 **Lógica de disparo:**
-- `vol_1min` ≥ `BLOCK_PRINT_MIN_VOL` = **100** contratos en ventana 60s
-- `cum_vol` (acumulado de sesión) ≥ `último_disparo_vol + 100` (umbral incremental: dispara en 100, 200, 300...)
-- `BLOCK_PRINT_MIN_DELTA` = **0.40** ≤ `|delta|` ≤ `BLOCK_PRINT_MAX_DELTA` = **0.90**
+- Mercado (9:01–17:59 ET): `trade_size` ≥ **150**, `|delta|` ≥ **0.40**
+- Fuera de mercado (18:00–9:00 ET): `trade_size` ≥ **100**, `|delta|` ≥ **0.30**
+- `|delta|` ≤ `BLOCK_PRINT_MAX_DELTA` = **0.90** (ambos horarios)
 - Cooldown: `BLOCK_PRINT_COOLDOWN_SECONDS` = **120s** por símbolo
 
 **Evaluación:** event-driven — se llama en cada Trade recibido.
@@ -114,11 +109,6 @@ Detecta acumulación de volumen en un **único contrato** — señal de una sola
 ### 3. Pressure Cooker `🔥`
 
 Detecta flujo sostenido en un único contrato a lo largo del tiempo — acumulación silenciosa que delata convicción direccional.
-
-**Ventana 2 minutos:**
-- `vol_2min` ≥ `PRESSURE_COOKER_2MIN_VOL` = **250** contratos
-- Re-dispara cuando supera `último_vol_disparado + 250`
-- Cooldown: `PRESSURE_COOKER_COOLDOWN_SECONDS` = **120s** por símbolo
 
 **Ventana 5 minutos:**
 - `vol_5min` ≥ `PRESSURE_COOKER_5MIN_VOL` = **500** contratos
@@ -195,7 +185,6 @@ Aplicados en `_handle_trades()` antes de pasar al engine:
 | `BLOCK_PRINT_MIN_DELTA` | `0.40` | Block Print |
 | `BLOCK_PRINT_MAX_DELTA` | `0.90` | Block Print |
 | `BLOCK_PRINT_COOLDOWN_SECONDS` | `120` | Block Print |
-| `PRESSURE_COOKER_2MIN_VOL` | `250` | Pressure Cooker |
 | `PRESSURE_COOKER_5MIN_VOL` | `500` | Pressure Cooker |
 | `PRESSURE_COOKER_COOLDOWN_SECONDS` | `120` | Pressure Cooker |
 
@@ -397,7 +386,7 @@ Total  380 contratos
 
 - Muestra las **últimas 10 transacciones** del tape del contrato
 - Formato de tape: `HH:MM:SS    size @ $precio  side`
-- Dispara por ventana 2min (≥250 vol) y 5min (≥500 vol) de forma independiente
+- Dispara por ventana 5min (≥500 vol)
 
 ### Mensajes de sistema
 

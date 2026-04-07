@@ -245,11 +245,10 @@ class TastyAlertSystem:
                                     direction, meta['strike'], meta['expiry_date'], vol_1min, mark
                                 ))
             else:
-                self.block_engine.accumulate(sym, result.vol_delta)
-                delta    = self.tracker.get_all_meta().get(sym, {}).get('delta', 0.0)
-                vol_acum = self.block_engine.get_accumulated(sym)
-                if self.block_engine.check(sym, delta):
-                    asyncio.create_task(self._send_block_print(sym, vol_acum))
+                delta      = self.tracker.get_all_meta().get(sym, {}).get('delta', 0.0)
+                trade_size = int(size)
+                if self.block_engine.check(sym, trade_size, delta, self._is_market_hours()):
+                    asyncio.create_task(self._send_block_print(sym, trade_size))
 
     async def _handle_quotes(self, streamer: DXLinkStreamer) -> None:
         async for quote in streamer.listen(Quote):
@@ -309,12 +308,8 @@ class TastyAlertSystem:
             tracker_meta = self.tracker.get_all_meta()
             for sym in self._active_symbols:
                 delta    = tracker_meta.get(sym, {}).get('delta', 0.0)
-                vol_2min = self.tracker.get_vol_window(sym, 120)
                 vol_5min = self.tracker.get_vol_window(sym, 300)
-                fire_2, fire_5 = self.pc_engine.check(sym, vol_2min, vol_5min, delta)
-                if fire_2:
-                    tape = self.tracker.get_tape(sym, 120)
-                    asyncio.create_task(self._send_pressure_cooker(sym, vol_2min, 2, tape))
+                fire_5 = self.pc_engine.check(sym, vol_5min, delta)
                 if fire_5:
                     tape = self.tracker.get_tape(sym, 300)
                     asyncio.create_task(self._send_pressure_cooker(sym, vol_5min, 5, tape))
@@ -322,6 +317,11 @@ class TastyAlertSystem:
     # ─────────────────────────────────────────────────────────────
     # Envío de alertas
     # ─────────────────────────────────────────────────────────────
+
+    def _is_market_hours(self) -> bool:
+        from datetime import time as dtime
+        t = datetime.now(_ET).time()
+        return dtime(9, 1) <= t <= dtime(17, 59)
 
     async def _send_raw_alert(self, direction, strike, expiry, vol_1min, mark):
         tg.send_raw_alert(direction, strike, expiry, vol_1min, mark)
@@ -436,7 +436,37 @@ class TastyAlertSystem:
             except Exception as e:
                 logger.warning(f"Error leyendo session.json ({e}), reautenticando...")
 
-        # ── 3. Password login (requiere dispositivo conocido) ──────
+        # ── 3. Intentar remember_token del JSON expirado antes de password ──
+        import json as _json
+        remember_token = None
+        if os.getenv("TT_SESSION_JSON"):
+            try:
+                data = _json.loads(base64.b64decode(os.getenv("TT_SESSION_JSON")).decode())
+                remember_token = data.get("remember_token")
+            except Exception:
+                pass
+        if not remember_token and os.path.exists(session_file):
+            try:
+                data = _json.loads(open(session_file).read())
+                remember_token = data.get("remember_token")
+            except Exception:
+                pass
+
+        if remember_token:
+            try:
+                logger.info("Intentando renovar sesión expirada con remember_token...")
+                session = Session(login=config.TT_USERNAME, remember_token=remember_token, remember_me=True)
+                with open(session_file, "w") as f:
+                    f.write(session.serialize())
+                new_b64 = base64.b64encode(session.serialize().encode()).decode()
+                os.environ["TT_SESSION_JSON"] = new_b64
+                logger.info(f"Sesión renovada con remember_token. Expira: {session.session_expiration}")
+                return session
+            except Exception as e:
+                logger.warning(f"remember_token renewal fallido en _make_session: {e}")
+
+        # ── 4. Password login — último recurso, requiere dispositivo autorizado ──
+        logger.info("Intentando login con username/password (requiere dispositivo autorizado)...")
         session = Session(
             login=config.TT_USERNAME,
             password=config.TT_PASSWORD,

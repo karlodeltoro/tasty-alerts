@@ -106,6 +106,7 @@ async def main() -> None:
 
     logger.info("Iniciando sesión de alertas Tastytrade...")
     retry_delay = 30
+    _device_challenge_retries = 0
     while not _stop.is_set():
         try:
             await system.run_session()
@@ -115,6 +116,25 @@ async def main() -> None:
             break
         except Exception as e:
             logger.error(f"Sesión terminada con error: {e}")
+            if "device_challenge" in str(e).lower():
+                _msg = (
+                    "🔐 *Tastytrade requiere login manual*\n\n"
+                    "El remember_token expiró y el password login requiere OTP.\n\n"
+                    "*Acción requerida:*\n"
+                    "`python login.py` desde Mac\n"
+                    "Luego actualizar TT_SESSION_JSON en Railway."
+                )
+                tg.send_message(_msg)
+                if _device_challenge_retries >= 1:
+                    logger.error("device_challenge_required: segundo intento fallido — deteniendo sistema.")
+                    break
+                _device_challenge_retries += 1
+                logger.info("device_challenge_required — esperando 1h antes de reintentar...")
+                try:
+                    await asyncio.wait_for(_stop.wait(), timeout=3600)
+                except asyncio.TimeoutError:
+                    pass
+                continue
 
         if _stop.is_set():
             break

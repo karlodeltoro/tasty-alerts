@@ -81,7 +81,7 @@ def send_sweep_burst(
     dot = "🟢" if direction == "CALL" else "🔴"
     dte = (expiry_date - date.today()).days
     exp_str = expiry_date.strftime("%-d %b %Y")
-    title = f"🌊 SWEEP  /ES  {dot} {direction}  {total_vol} vol  {n} strikes"
+    title = f"🌊 SWEEP BURST  /ES  {dot} {direction}  {total_vol} vol  {n} strikes"
     now_hms = datetime.now(_ET).strftime("%H:%M:%S")
 
     def _side(bid, ask, price):
@@ -134,7 +134,7 @@ def send_block_print(
     else:                    side = "MID"
 
     text = (
-        f"*🖨️ BLOCK  {label}  {direction}  /ES  {vol_delta} vol*\n"
+        f"*🖨️ BLOCK PRINT  {label}  {direction}  /ES  {vol_delta} vol*\n"
         f"\n"
         f"{exp_str}  |  {dte} DTE  |  \u0394 {abs(delta):.2f}  |  IV {iv_pct}%\n"
         f"{_SEP}\n"
@@ -170,7 +170,7 @@ def send_pressure_cooker(
     label   = f"{int(strike)}{dot}"
     exp_str = expiry_date.strftime("%-d %b %Y")
     now_hms = datetime.now(_ET).strftime("%H:%M:%S")
-    title   = f"🔥 FLOW  {label}  /ES  {vol_accumulated} vol  {minutes}m"
+    title   = f"🔥 PRESSURE COOKER  {label}  /ES  {vol_accumulated} vol  {minutes}m"
 
     def _side(price):
         if price <= bid:   return "BID"

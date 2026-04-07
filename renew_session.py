@@ -58,6 +58,24 @@ def _get_new_session() -> Session:
         except Exception as e:
             logger.warning(f"remember_token renewal fallido: {e}")
 
+    # Fallback: leer remember_token desde session.json en disco
+    session_file = os.path.join(os.path.dirname(__file__), "session.json")
+    if os.path.exists(session_file):
+        try:
+            data = json.loads(open(session_file).read())
+            remember_token = data.get("remember_token")
+            if remember_token:
+                logger.info("Renovando con remember_token desde session.json...")
+                session = Session(
+                    login=username,
+                    remember_token=remember_token,
+                    remember_me=True,
+                )
+                logger.info("Sesion renovada con remember_token (session.json).")
+                return session
+        except Exception as e:
+            logger.warning(f"Error leyendo session.json para remember_token: {e}")
+
     logger.info("Renovando con username/password (requiere Mac)...")
     session = Session(
         login=username,
@@ -131,6 +149,15 @@ def renew() -> bool:
 
     # Actualizar en memoria para el proceso actual
     os.environ["TT_SESSION_JSON"] = new_b64
+
+    # Persistir en session.json para fallback local
+    try:
+        session_file = os.path.join(os.path.dirname(__file__), "session.json")
+        with open(session_file, "w") as f:
+            f.write(serialized)
+        logger.info("Sesión persistida en session.json")
+    except Exception as e:
+        logger.warning(f"No se pudo escribir session.json: {e}")
 
     railway_ok = _update_railway(new_b64)
     exp = session.session_expiration

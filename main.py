@@ -66,8 +66,8 @@ async def main() -> None:
     scheduler.add_job(
         system.reload_chain,
         trigger="cron",
-        hour=17,
-        minute=15,
+        hour=16,
+        minute=0,
         id="switch_expiration",
     )
     scheduler.add_job(
@@ -90,7 +90,7 @@ async def main() -> None:
         id="expiry_watchdog",
     )
     scheduler.start()
-    logger.info("Scheduler activo — switch 17:15 ET, verificación 18:05 ET, renovación sesión cada 8h, watchdog expiración cada 1h")
+    logger.info("Scheduler activo — switch 16:00 ET, verificación 18:05 ET, renovación sesión cada 8h, watchdog expiración cada 1h")
 
     loop = asyncio.get_running_loop()
     _stop = asyncio.Event()

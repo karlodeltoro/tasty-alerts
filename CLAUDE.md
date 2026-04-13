@@ -4,7 +4,7 @@
 
 Sistema de monitoreo en tiempo real del flujo de opciones institucional sobre futuros `/ES` (E-mini S&P 500) y `/GC` (Oro). Conectado directamente al feed DXFeed de Tastytrade vía WebSocket, detecta patrones de flujo — Sweep Burst, Block Print, Pressure Cooker — y los envía como alertas a Telegram.
 
-El sistema corre 24/7 en Railway con renovación automática de sesión cada 20 horas.
+El sistema corre en Railway con pausa automática de fin de semana (viernes 18:00 ET → domingo 18:00 ET).
 
 ---
 
@@ -19,6 +19,17 @@ El sistema corre 24/7 en Railway con renovación automática de sesión cada 20 
 | Notificaciones | Telegram Bot API via `httpx==0.28.1` |
 | Deploy | Railway (cloud, redeploy automático por push) |
 | Config | `python-dotenv==1.2.2` |
+
+---
+
+## Horario de Operación
+
+| Periodo | Estado |
+|---------|--------|
+| Domingo 18:00 ET → Viernes 18:00 ET | ✅ Stream activo |
+| Viernes 18:00 ET → Domingo 18:00 ET | ⏸ Stream pausado (proceso vivo, sesión renovándose) |
+
+El proceso **nunca muere** durante el fin de semana — permanece en espera para evitar que Railway lo reinicie en loop. La renovación de sesión (`renew_session`) y el watchdog de expiración siguen corriendo durante la pausa.
 
 ---
 
@@ -46,31 +57,40 @@ tasty_stream.py — TastyAlertSystem
     ▼
 alert_engine.py — detección de patrones
     │
-    ▼
-telegram_notifier.py — formateo y envío
-    │
-    ▼
-Telegram (canal privado)
+    ├─ Canal Telegram (TELEGRAM_CHAT_ID)     → alertas de trading
+    └─ Chat privado (TELEGRAM_PRIVATE_CHAT_ID) → estado del sistema
 ```
 
 ### Ciclo de vida de la sesión
 
 ```
 Arranque
-  → _make_session()  (prioridad: TT_SESSION_JSON env → session.json → user/pass)
+  → _is_weekend_now()     (si es fin de semana, entra en modo pausa directamente)
+  → _make_session()       (prioridad: TT_SESSION_JSON env → session.json → user/pass)
   → DXLinkStreamer abre WebSocket
-  → load_chain()     (carga cadena 0DTE, registra símbolos, obtiene precio futuro)
-  → subscribe(Trade, Quote, Greeks)  para todos los contratos
-  → asyncio.gather() lanza los 4 handlers concurrentes
+  → load_chain()          (carga cadena 0DTE, registra símbolos, obtiene precio futuro)
+  → subscribe(Trade, Quote, Greeks) para todos los contratos
+  → asyncio.create_task(run_session(), name="run_session")
+  → asyncio.gather() lanza 4 handlers concurrentes
 
-17:15 ET diario
-  → reload_chain()   (usa el MISMO streamer principal, re-suscribe nuevos contratos)
+Viernes 18:00 ET
+  → _enter_weekend()      (cancela la task "run_session", pone _weekend.set())
+  → main loop espera en bucle de 5 min hasta que _weekend se limpie
 
-Cada 20 horas
-  → renew_session.py (renueva token via remember_token, actualiza Railway via GraphQL)
+16:00 ET (lun-vie)
+  → reload_chain()        (usa el MISMO streamer principal, re-suscribe nuevos contratos)
 
-18:05 ET
-  → verify_stream()  (confirma contratos activos, envía mensaje Telegram)
+Cada 8 horas (24/7, incluyendo fin de semana)
+  → renew_session.py      (renueva token, actualiza Railway via GraphQL)
+
+Cada 1 hora (24/7)
+  → _expiry_watchdog()    (renueva si la sesión expira en < 10h)
+
+18:05 ET (lun-vie)
+  → verify_stream()       (confirma contratos activos)
+
+Domingo 18:00 ET
+  → _exit_weekend()       (limpia _weekend, main loop reconecta solo)
 ```
 
 ---
@@ -146,7 +166,8 @@ Aplicados en `_handle_trades()` antes de pasar al engine:
 | `TT_USERNAME` | Email de la cuenta Tastytrade |
 | `TT_PASSWORD` | Contraseña Tastytrade (para renovación desde Mac) |
 | `TELEGRAM_BOT_TOKEN` | Token del bot de Telegram (`@BotFather`) |
-| `TELEGRAM_CHAT_ID` | ID del chat/canal destino de alertas |
+| `TELEGRAM_CHAT_ID` | ID del canal de alertas (suscriptores) |
+| `TELEGRAM_PRIVATE_CHAT_ID` | ID del chat privado (notificaciones de sistema y errores) |
 
 ### Sesión (Railway production)
 
@@ -217,14 +238,24 @@ python login.py
 # Imprime el valor base64 para pegar como TT_SESSION_JSON en Railway
 ```
 
-### Renovación automática (cada 20 horas)
+### Renovación automática desde Mac (LaunchAgent)
 
-`renew_session.py` se ejecuta automáticamente desde el scheduler. Estrategia:
+`auto_renew.py` corre como LaunchAgent macOS cada **6 horas** via `com.bullcore.autorenew.plist`.
+- Autentica con username/password (Mac es dispositivo autorizado — sin OTP)
+- Actualiza `session.json` local
+- Actualiza `TT_SESSION_JSON` en Railway via GraphQL API
+- Notifica el resultado al chat privado de Telegram
 
-1. **remember_token** (funciona desde Railway): extrae el `remember_token` del `TT_SESSION_JSON` actual y autentica sin password.
-2. **username/password** (fallback, solo desde Mac — dispositivo autorizado).
+**Importante — macOS Sequoia TCC:** `launchd` no puede escribir en `~/Desktop/` para `StandardOutPath`. Los logs del agente van a `~/Library/Logs/bullcore_autorenew.log` (no al directorio del proyecto).
 
-Tras renovar, actualiza `TT_SESSION_JSON` en Railway via GraphQL API y notifica a Telegram.
+```bash
+# Ver logs del LaunchAgent
+cat ~/Library/Logs/bullcore_autorenew.log
+
+# Recargar el agente tras cambios al plist
+launchctl unload ~/Library/LaunchAgents/com.bullcore.autorenew.plist
+launchctl load  ~/Library/LaunchAgents/com.bullcore.autorenew.plist
+```
 
 ### Renovación manual (si falla la automática)
 
@@ -233,13 +264,14 @@ Tras renovar, actualiza `TT_SESSION_JSON` en Railway via GraphQL API y notifica 
 python renew_session.py
 ```
 
-Si Railway no se actualiza automáticamente, copiar el nuevo valor de `TT_SESSION_JSON` del log y pegarlo manualmente en las variables de entorno de Railway.
+Si Railway no se actualiza automáticamente, el chat privado de Telegram recibirá el base64 para pegarlo manualmente.
 
 ### Prioridad de autenticación en `_make_session()`
 
 1. `TT_SESSION_JSON` env var (base64) — Railway production
 2. `session.json` local — desarrollo / fallback
-3. Login con `TT_USERNAME` + `TT_PASSWORD` — solo dispositivo conocido (Mac)
+3. `remember_token` extraído de la sesión expirada
+4. Login con `TT_USERNAME` + `TT_PASSWORD` — solo dispositivo conocido (Mac)
 
 ---
 
@@ -253,6 +285,7 @@ TT_PASSWORD=...
 TT_SESSION_JSON=<base64 generado con python login.py>
 TELEGRAM_BOT_TOKEN=...
 TELEGRAM_CHAT_ID=...
+TELEGRAM_PRIVATE_CHAT_ID=...
 ```
 
 ### Variables para auto-renovación de sesión
@@ -273,31 +306,27 @@ Railway hace redeploy automático con cada `git push origin main`. También se p
 Los logs muestran la secuencia de arranque completa. Secuencia esperada al arrancar:
 
 ```
+Iniciando sistema de alertas Tastytrade...
+Scheduler activo — reload 16:00 ET (lun-vie), verificación 18:05 ET (lun-vie), ...
 Sesión cargada desde TT_SESSION_JSON (expira ...)
 === load_chain() iniciado ===
   Hora ET: HH:MM:SS | today=YYYY-MM-DD | today_expired=False
   WATCH_SYMBOLS: ['/ES']
 Cargando cadena /ES...
   Chain OK — option_chains=1, futures=N
-  Expiraciones disponibles (N): [...]
   Expiración activa: YYYY-MM-DD (N strikes totales)
   Futuro front-month: /ESM5
   Precio /ESM5: XXXX.XX | Filtro distancia: ±15%
   /ES: NNN contratos registrados (M strikes descartados por distancia)
 === load_chain() completado: NNN contratos totales ===
-Registrando suscripción Trade para NNN símbolos...
-  Trade OK. Muestra: ['.../ES...', ...]
-Registrando suscripción Quote para NNN símbolos...
-  Quote OK.
-Registrando suscripción Greeks para NNN símbolos...
-  Greeks OK.
 === Streaming activo — NNN contratos suscritos. Esperando eventos... ===
-[DIAGNÓSTICO] Primer Quote recibido: sym=..., bid=..., ask=...
 [DIAGNÓSTICO] Primer Trade recibido: sym=..., size=..., price=...
-[HEARTBEAT] contratos=NNN | trades_total=X (+Y/min) | quotes_total=X (+Y/min) | greeks_total=X (+Y/min)
+[HEARTBEAT] contratos=NNN | trades_total=X (+Y/min) | ...
 ```
 
 **Señal de problema:** Si el heartbeat muestra `trades_total=0` con `contratos>0` después de varios minutos en horario de mercado, hay un problema de suscripción.
+
+**Fin de semana:** Los logs mostrarán `Modo fin de semana — stream pausado` con checks cada 5 min. Normal.
 
 ---
 
@@ -305,34 +334,85 @@ Registrando suscripción Greeks para NNN símbolos...
 
 ### Bug 1 — `reload_chain()` creaba un streamer paralelo (CRÍTICO, fix aplicado)
 
-**Síntoma:** Tras el reload de las 17:15 ET, el stream quedaba ciego para los contratos del nuevo día. Los logs mostraban "Recarga completada" pero nunca llegaban eventos de los nuevos símbolos.
+**Síntoma:** Tras el reload de las 16:00 ET, el stream quedaba ciego para los contratos del nuevo día.
 
-**Causa:** `reload_chain()` abría un `DXLinkStreamer` nuevo, cargaba la cadena (actualizando `_contract_meta` y `_active_symbols`), y cerraba el nuevo streamer **sin registrar suscripciones en el streamer principal**. El streamer principal continuaba con suscripciones a los símbolos del día anterior.
+**Causa:** `reload_chain()` abría un `DXLinkStreamer` nuevo, cargaba la cadena y cerraba el nuevo streamer sin registrar suscripciones en el streamer principal.
 
-**Fix:** `reload_chain()` ahora usa `self._streamer` (referencia al streamer principal activo) para cargar la cadena y llamar a `subscribe(Trade/Quote/Greeks)` en el mismo WebSocket.
+**Fix:** `reload_chain()` usa `self._streamer` (referencia al streamer principal activo) para cargar la cadena y suscribir en el mismo WebSocket.
 
 ### Bug 2 — Falta de visibilidad en el flujo (fix aplicado)
 
-**Síntoma:** El stream conectaba (keepalives cada 30s) pero no había forma de saber si los eventos llegaban pero eran filtrados, o si directamente no había suscripciones activas.
+**Síntoma:** El stream conectaba pero no había forma de saber si los eventos llegaban o si las suscripciones estaban activas.
 
-**Fix:** Se añadieron:
-- Logs detallados en `load_chain()` con cada paso de la carga (expiración elegida, precio del futuro, strikes antes/después del filtro, muestra de símbolos).
-- Logs de confirmación para cada `subscribe()` en `run_session()` y `reload_chain()`.
-- Log del **primer evento recibido** de cada tipo (Trade, Quote, Greeks), incluyendo el símbolo — aunque no esté en `_contract_meta`.
-- **Heartbeat cada 60s** en `_periodic_checks()` con conteo de eventos por tipo y advertencia si hay 0 trades con contratos activos.
+**Fix:** Logs detallados en `load_chain()`, confirmación de cada `subscribe()`, log del primer evento de cada tipo, heartbeat cada 60s con conteo de eventos por tipo.
+
+### Bug 3 — `RuntimeError: Event loop stopped before Future completed.` en Python 3.14 (fix aplicado)
+
+**Síntoma:** Al recibir SIGTERM (e.g. Railway redeploy), el proceso terminaba con `RuntimeError` en lugar de salir limpiamente.
+
+**Causa (a):** El shutdown handler llamaba `_stop.set()` pero no cancelaba las tareas async activas. En Python 3.14, `asyncio.run()` lanza `RuntimeError` si quedan futures pendientes cuando el loop para.
+
+**Causa (b):** El `try/except` exterior solo capturaba `KeyboardInterrupt` y `SystemExit`, dejando `RuntimeError` sin capturar.
+
+**Fix:**
+```python
+# En _shutdown(): cancelar todas las tasks activas
+for task in asyncio.all_tasks(loop):
+    task.cancel()
+
+# En __main__:
+except (KeyboardInterrupt, SystemExit, RuntimeError):
+    pass
+```
+
+### Bug 4 — LaunchAgent sin logs (macOS Sequoia TCC, fix aplicado)
+
+**Síntoma:** `auto_renew.log` dejó de recibir entradas aunque el agente seguía corriendo (session.json se actualizaba).
+
+**Causa:** macOS Sequoia bloquea que `launchd` abra archivos para `StandardOutPath` dentro de `~/Desktop/`. La salida del proceso iba a `/dev/null`.
+
+**Fix:** Mover `StandardOutPath` y `StandardErrorPath` a `~/Library/Logs/bullcore_autorenew.log`. El proceso Python puede escribir en `~/Desktop/` directamente (tiene permisos de usuario), pero `launchd` no puede abrir descriptores de archivo ahí.
 
 ### Nota — Renovación automática de sesión
 
-La renovación automática (cada 20h vía `renew_session.py`) actualiza `TT_SESSION_JSON` en Railway via GraphQL pero **no provoca redeploy**. El proceso en memoria usa la nueva sesión directamente (`os.environ["TT_SESSION_JSON"] = new_b64`). El streamer principal no se reinicia — la renovación solo afecta a futuras llamadas a `_make_session()`.
+La renovación automática actualiza `TT_SESSION_JSON` en Railway via GraphQL pero **no provoca redeploy**. El proceso en memoria usa la nueva sesión directamente (`os.environ["TT_SESSION_JSON"] = new_b64`). El streamer principal no se reinicia.
 
 ---
 
-## Formato de Alertas Telegram
+## Notificaciones Telegram
+
+### Canal de alertas (`TELEGRAM_CHAT_ID`) — para suscriptores
+
+| Alerta | Cuándo |
+|--------|--------|
+| `🌊 SWEEP BURST` | Ráfaga coordinada multi-strike detectada |
+| `🖨️ BLOCK PRINT` | Transacción única ≥ umbral en T&S |
+| `🔥 PRESSURE COOKER` | Flujo sostenido acumulado en 5 min |
+
+### Chat privado (`TELEGRAM_PRIVATE_CHAT_ID`) — para el operador
+
+| Mensaje | Cuándo |
+|---------|--------|
+| `🚀 BullCore Capital V1 — EN VIVO` | Al arrancar `run_session()` |
+| `⏸ Sistema pausado — mercado cerrado` | Viernes 18:00 ET |
+| `▶️ Sistema reanudado — mercado abierto` | Domingo 18:00 ET |
+| `⏸ Arranque en fin de semana` | Si el proceso arranca durante el fin de semana |
+| `🔄 Cadena recargada — nueva sesión` | Al completar `reload_chain()` |
+| `✅ Stream verificado (18:05 ET)` | Verificación automática diaria |
+| `🔑 Sesion Tastytrade renovada` | Tras renovación exitosa de sesión |
+| `❌ Fallo renovacion sesion` | Si falla la renovación automática |
+| `⚠️ Railway NO actualizado` | Si Railway no pudo actualizarse (incluye base64 para pegar manualmente) |
+| `🔐 Tastytrade requiere login manual` | Si se necesita OTP (remember_token expirado) |
+| `⛔ Sistema de alertas detenido` | Al recibir SIGINT/SIGTERM |
+
+---
+
+## Formato de Alertas de Trading
 
 ### Sweep Burst `🌊`
 
 ```
-🌊 SWEEP  /ES  🟢 CALL  320 vol  6 strikes
+🌊 SWEEP BURST  /ES  🟢 CALL  320 vol  6 strikes
 
 1 Apr 2025  |  0 DTE
 ─────────────────────
@@ -343,37 +423,30 @@ La renovación automática (cada 20h vía `renew_session.py`) actualiza `TT_SESS
 5840C   Δ 0.37   40 vol   $7.00   BID
 5850C   Δ 0.34   30 vol   $6.00   MID
 ─────────────────────
-09:47:23 ET  |  via Tastytrade
+09:47:23 ET  |  via BullCore
 ```
-
-- `🟢` para CALL, `🔴` para PUT
-- Side (BID/ASK/MID) calculado comparando precio de ejecución contra bid/ask
-- Strikes ordenados por precio ascendente
 
 ### Block Print `🖨️`
 
 ```
-🖨️ BLOCK  5800🟢  CALL  /ES  250 vol
+🖨️ BLOCK PRINT  5800🟢  CALL  /ES  250 vol
 
 1 Apr 2025  |  0 DTE  |  Δ 0.52  |  IV 18%
 ─────────────────────
 Bid 12.25  |  Ask 12.75  |  Exec $12.75
 ─────────────────────
 250 contratos en el ASK
-10:15:44 ET  |  via Tastytrade
+10:15:44 ET  |  via BullCore
 ```
-
-- El vol reportado es el de la **ventana 1min** (`get_accumulated`)
-- Side calculado comparando `exec_price` vs bid/ask del contrato
 
 ### Pressure Cooker `🔥`
 
 ```
-🔥 FLOW  5800🟢  /ES  380 vol  2m
+🔥 PRESSURE COOKER  5800🟢  /ES  380 vol  5m
 
 1 Apr 2025  |  0 DTE  |  Δ 0.52  |  IV 18%
 ─────────────────────
-Tape  2m
+Tape  5m
 10:14:01    45 @ $12.50  ASK
 10:14:23    60 @ $12.75  ASK
 10:14:55    80 @ $12.50  MID
@@ -381,20 +454,5 @@ Tape  2m
 10:15:38    85 @ $12.75  ASK
 ─────────────────────
 Total  380 contratos
-10:15:44 ET  |  via Tastytrade
+10:15:44 ET  |  via BullCore
 ```
-
-- Muestra las **últimas 10 transacciones** del tape del contrato
-- Formato de tape: `HH:MM:SS    size @ $precio  side`
-- Dispara por ventana 5min (≥500 vol)
-
-### Mensajes de sistema
-
-| Mensaje | Cuándo |
-|---------|--------|
-| `🚀 BullCore Capital V1 — EN VIVO` | Al arrancar `run_session()` |
-| `🔄 Cadena recargada — nueva sesión` | Al completar `reload_chain()` |
-| `✅ Stream verificado (18:05 ET)` | Verificación automática diaria |
-| `🔑 Sesion Tastytrade renovada` | Tras renovación exitosa de sesión |
-| `❌ Fallo renovacion sesion` | Si falla la renovación automática |
-| `⛔ Sistema de alertas detenido` | Al recibir SIGINT/SIGTERM |

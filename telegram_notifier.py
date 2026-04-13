@@ -61,10 +61,18 @@ def _now_et() -> str:
 
 
 def send_message(text: str) -> bool:
-    """Envía un mensaje de texto libre a Telegram."""
+    """Envía un mensaje de texto libre al canal de alertas."""
     return _post(
         {"chat_id": config.TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"},
         "send_message",
+    )
+
+
+def send_private_message(text: str) -> bool:
+    """Envía un mensaje de texto libre al chat privado (sistema/errores)."""
+    return _post_private(
+        {"text": text, "parse_mode": "Markdown"},
+        "send_private_message",
     )
 
 
@@ -231,7 +239,7 @@ _SEP_THICK = "\u2501" * 20  # ━━━━━━━━━━━━━━━━�
 
 
 def send_startup_message(symbol_count: int, expiry_date: date | None) -> None:
-    """Notifica al arrancar el sistema — se llama UNA sola vez al inicio."""
+    """Notifica al arrancar el sistema — va al chat privado."""
     now_et  = datetime.now(_ET)
     now_str = now_et.strftime("%I:%M %p ET").lstrip("0")
     dte     = (expiry_date - date.today()).days if expiry_date else "?"
@@ -247,18 +255,11 @@ def send_startup_message(symbol_count: int, expiry_date: date | None) -> None:
         f"{_SEP_THICK}\n"
         f"⏰ Inicio: {now_str}"
     )
-    try:
-        httpx.post(
-            f"{_TELEGRAM_BASE}/sendMessage",
-            json={"chat_id": config.TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"},
-            timeout=10,
-        ).raise_for_status()
-    except httpx.HTTPError as e:
-        logger.error(f"Telegram startup msg error: {e}")
+    _post_private({"text": text, "parse_mode": "Markdown"}, "startup")
 
 
 def send_reload_message(symbol_count: int, expiry_date: date | None) -> None:
-    """Notifica el reload diario de la cadena (17:15 ET)."""
+    """Notifica el reload diario de la cadena — va al chat privado."""
     exp_str = str(expiry_date) if expiry_date else "?"
     dte     = (expiry_date - date.today()).days if expiry_date else "?"
     now_str = datetime.now(_ET).strftime("%I:%M %p ET").lstrip("0")
@@ -268,34 +269,20 @@ def send_reload_message(symbol_count: int, expiry_date: date | None) -> None:
         f"📅 Nueva expiración: {exp_str} ({dte} DTE)\n"
         f"⏰ {now_str}"
     )
-    try:
-        httpx.post(
-            f"{_TELEGRAM_BASE}/sendMessage",
-            json={"chat_id": config.TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"},
-            timeout=10,
-        ).raise_for_status()
-    except httpx.HTTPError as e:
-        logger.error(f"Telegram reload msg error: {e}")
+    _post_private({"text": text, "parse_mode": "Markdown"}, "reload")
 
 
 def send_stream_verification_message(symbols: list[str]) -> None:
-    """Confirmación 18:05 ET — stream activo con los contratos de la nueva sesión."""
+    """Confirmación 18:05 ET — va al chat privado."""
     count = len(symbols)
-    now_str = datetime.now().strftime("%H:%M:%S")
+    now_str = datetime.now(_ET).strftime("%H:%M:%S ET")
     text = (
         f"✅ *Stream verificado (18:05 ET)*\n"
         f"🎯 *{count}* contratos activos para la sesión nocturna\n"
         f"📌 Subyacentes: `{', '.join(config.WATCH_SYMBOLS)}`\n"
         f"🕐 {now_str}"
     )
-    try:
-        httpx.post(
-            f"{_TELEGRAM_BASE}/sendMessage",
-            json={"chat_id": config.TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"},
-            timeout=10,
-        ).raise_for_status()
-    except httpx.HTTPError as e:
-        logger.error(f"Telegram verify msg error: {e}")
+    _post_private({"text": text, "parse_mode": "Markdown"}, "stream verification")
 
 
 def send_session_renewed(expiration: object, railway_updated: bool) -> None:
@@ -330,25 +317,16 @@ def send_shutdown_message() -> None:
 
 
 def send_session_json_manual_update(new_b64: str, expiration: object) -> None:
-    """Cuando Railway no se actualiza automáticamente, envía el base64 por Telegram en chunks."""
+    """Cuando Railway no se actualiza automáticamente, envía el base64 al chat privado en chunks."""
     warning_text = (
         f"⚠️ *Railway NO actualizado — acción requerida*\n"
         f"Sesión renovada en memoria. Expira: {expiration}\n\n"
         f"Copia el valor del siguiente mensaje y pégalo en\n"
         f"Railway → Variables → TT_SESSION_JSON → Redeploy"
     )
-    try:
-        httpx.post(f"{_TELEGRAM_BASE}/sendMessage",
-            json={"chat_id": config.TELEGRAM_CHAT_ID, "text": warning_text, "parse_mode": "Markdown"},
-            timeout=10).raise_for_status()
-    except Exception as e:
-        logger.error(f"Telegram manual update warning error: {e}")
+    _post_private({"text": warning_text, "parse_mode": "Markdown"}, "session json warning")
     for idx, chunk in enumerate([new_b64[i:i+3800] for i in range(0, len(new_b64), 3800)], 1):
-        try:
-            httpx.post(f"{_TELEGRAM_BASE}/sendMessage",
-                json={"chat_id": config.TELEGRAM_CHAT_ID,
-                      "text": f"TT_SESSION_JSON:\n\n`{chunk}`",
-                      "parse_mode": "Markdown"},
-                timeout=10).raise_for_status()
-        except Exception as e:
-            logger.error(f"Telegram session_json chunk {idx} error: {e}")
+        _post_private(
+            {"text": f"TT_SESSION_JSON:\n\n`{chunk}`", "parse_mode": "Markdown"},
+            f"session json chunk {idx}",
+        )

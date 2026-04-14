@@ -200,7 +200,7 @@ async def main() -> None:
             logger.info("Modo fin de semana — stream pausado. Esperando domingo 18:00 ET...")
             while _weekend.is_set() and not _stop.is_set():
                 try:
-                    await asyncio.wait_for(_stop.wait(), timeout=300)
+                    await asyncio.wait_for(_stop.wait(), timeout=10)
                 except asyncio.TimeoutError:
                     pass
             if _stop.is_set():

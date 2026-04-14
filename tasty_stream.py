@@ -94,6 +94,7 @@ class TastyAlertSystem:
         self.block_accum_engine.reset()
         self.pc_engine.reset()
         self._contract_meta.clear()
+        self._pending_trades.clear()
         self._reset_counters()
         all_symbols: list[str] = []
 

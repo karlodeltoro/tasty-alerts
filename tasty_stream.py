@@ -220,7 +220,12 @@ class TastyAlertSystem:
             meta = self._contract_meta[sym]
             bid  = meta.get('bid', 0.0)
             ask  = meta.get('ask', 0.0)
-            mark = (bid + ask) / 2.0 if (bid + ask) > 0 else 0.0
+
+            # Sin Quote todavía — no hay precio confiable, ignorar el trade
+            if bid == 0.0 and ask == 0.0:
+                continue
+
+            mark = (bid + ask) / 2.0
             if mark < config.MIN_CONTRACT_PRICE:
                 continue
 

@@ -103,7 +103,7 @@ Detecta ráfagas coordinadas: múltiples strikes de la **misma dirección** con 
 
 **Condición de disparo:**
 - ≥ `SWEEP_BURST_MIN_CONTRACTS_B` = **3** contratos distintos
-- Cada uno con ≥ `SWEEP_BURST_MIN_VOL_B` = **50** contratos vol en ask en 60s
+- Cada uno con ≥ `SWEEP_BURST_MIN_VOL_B` = **50** contratos de volumen total acumulado en 60s
 
 **Cooldown:** `ALERT_COOLDOWN_SECONDS` = **120s** por dirección (CALL/PUT independiente).
 

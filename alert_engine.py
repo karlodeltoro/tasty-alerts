@@ -24,18 +24,16 @@ class SweepBurstEngine:
         self,
         vol_snapshot: dict[str, int],      # symbol → vol total acumulado en 60s
         tracker_meta: dict[str, dict],     # symbol → {underlying, contract_type, delta}
-        ask_vol_snapshot: dict[str, int] | None = None,  # symbol → vol en ask en 60s
+        ask_vol_snapshot: dict[str, int] | None = None,  # ignorado, mantenido por compatibilidad
     ) -> tuple[str, list[tuple[str, int]]] | None:
         """
         Evalúa si se cumple la condición de Sweep Burst.
         Retorna (direction, [(symbol, vol), ...]) ordenado por vol desc, o None.
 
-        Condición: ≥ SWEEP_BURST_MIN_CONTRACTS_B contratos con ask_vol ≥ SWEEP_BURST_MIN_VOL_B
-                   (solo cuenta volumen ejecutado en el ask; requiere ask_vol_snapshot)
+        Condición: ≥ SWEEP_BURST_MIN_CONTRACTS_B contratos con vol_total ≥ SWEEP_BURST_MIN_VOL_B
+                   (acumulación de volumen total en 60s, independiente de ask/bid)
         """
-        _ask = ask_vol_snapshot or {}
-
-        # Separar contratos elegibles por dirección (vol en ask ≥ SWEEP_BURST_MIN_VOL_B)
+        # Separar contratos elegibles por dirección (vol total ≥ SWEEP_BURST_MIN_VOL_B)
         calls: list[tuple[str, int]] = []
         puts:  list[tuple[str, int]] = []
 
@@ -44,13 +42,12 @@ class SweepBurstEngine:
             if not meta:
                 continue
             ct = meta.get('contract_type')
-            ask_vol = _ask.get(sym, 0)
             if ct == 'CALL':
-                if ask_vol >= config.SWEEP_BURST_MIN_VOL_B:
-                    calls.append((sym, ask_vol))
+                if vol >= config.SWEEP_BURST_MIN_VOL_B:
+                    calls.append((sym, vol))
             elif ct == 'PUT':
-                if ask_vol >= config.SWEEP_BURST_MIN_VOL_B:
-                    puts.append((sym, ask_vol))
+                if vol >= config.SWEEP_BURST_MIN_VOL_B:
+                    puts.append((sym, vol))
 
         for direction, group in [('CALL', calls), ('PUT', puts)]:
             if len(group) >= config.SWEEP_BURST_MIN_CONTRACTS_B and self._can_fire(direction):

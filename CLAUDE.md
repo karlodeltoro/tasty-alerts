@@ -198,7 +198,7 @@ Aplicados en `_handle_trades()` antes de pasar al engine:
 | `SWEEP_BURST_MIN_CONTRACTS` | `5` | Sweep cond A |
 | `SWEEP_BURST_MIN_VOL` | `50` | Sweep cond A |
 | `SWEEP_BURST_MIN_CONTRACTS_B` | `3` | Sweep cond B |
-| `SWEEP_BURST_MIN_VOL_B` | `75` | Sweep cond B |
+| `SWEEP_BURST_MIN_VOL_B` | `50` | Sweep cond B |
 | `ALERT_COOLDOWN_SECONDS` | `120` | Sweep |
 | `MIN_DELTA` | `0.30` | Sweep + Pressure Cooker |
 | `MAX_DELTA` | `0.95` | Sweep + Pressure Cooker |

@@ -43,8 +43,6 @@ class SweepBurstEngine:
             meta = tracker_meta.get(sym)
             if not meta:
                 continue
-            if abs(meta.get('delta', 0.0)) < config.MIN_DELTA:
-                continue
             ct = meta.get('contract_type')
             ask_vol = _ask.get(sym, 0)
             if ct == 'CALL':
@@ -101,10 +99,6 @@ class PressureCookerEngine:
         Retorna fire_5min.
         Registra cooldown y umbral de vol al disparar.
         """
-        abs_delta = abs(delta)
-        if abs_delta < config.MIN_DELTA or abs_delta > config.MAX_DELTA:
-            return False
-
         now = datetime.now()
 
         next_5 = self._last_fired_vol_5min.get(symbol, 0) + config.PRESSURE_COOKER_5MIN_VOL
@@ -152,19 +146,15 @@ class BlockPrintEngine:
         self._last_fired: dict[str, datetime] = {}
 
     def check(self, symbol: str, trade_size: int, delta: float, is_market_hours: bool) -> bool:
-        min_vol   = 150 if is_market_hours else 100
-        min_delta = config.BLOCK_PRINT_MIN_DELTA if is_market_hours else 0.30
+        min_vol = 150 if is_market_hours else 100
 
-        abs_delta = abs(delta)
-        if abs_delta < min_delta or abs_delta > config.BLOCK_PRINT_MAX_DELTA:
-            return False
         if trade_size < min_vol:
             return False
         if not self._can_fire(symbol):
             return False
 
         self._last_fired[symbol] = datetime.now()
-        logger.info(f"BLOCK PRINT {symbol} — trade_size={trade_size} |delta|={abs_delta:.2f} market_hours={is_market_hours}")
+        logger.info(f"BLOCK PRINT {symbol} — trade_size={trade_size} |delta|={abs(delta):.2f} market_hours={is_market_hours}")
         return True
 
     def _can_fire(self, symbol: str) -> bool:

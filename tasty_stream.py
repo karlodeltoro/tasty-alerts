@@ -221,7 +221,7 @@ class TastyAlertSystem:
             bid  = meta.get('bid', 0.0)
             ask  = meta.get('ask', 0.0)
             mark = (bid + ask) / 2.0 if (bid + ask) > 0 else 0.0
-            if mark > 0 and mark < config.MIN_CONTRACT_PRICE:
+            if mark < config.MIN_CONTRACT_PRICE:
                 continue
 
             trade_price = float(trade.price) if trade.price else mark

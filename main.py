@@ -213,7 +213,9 @@ async def main() -> None:
         session_task = asyncio.create_task(system.run_session(), name="run_session")
         try:
             await session_task
-            logger.warning("run_session() terminó sin error inesperadamente.")
+            # Clean exit — reset backoff so next reconnect is fast
+            logger.info("Session ended cleanly — resetting retry_delay to 30s")
+            retry_delay = 30
 
         except asyncio.CancelledError:
             if _weekend.is_set():

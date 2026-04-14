@@ -80,3 +80,16 @@ RAW_ALERT_MODE       = os.getenv("RAW_ALERT_MODE", "false").lower() == "true"
 RAW_MIN_PRICE        = float(os.getenv("RAW_MIN_PRICE", "10.00"))
 RAW_MIN_VOL_1MIN     = int(os.getenv("RAW_MIN_VOL_1MIN", "50"))
 RAW_COOLDOWN_SECONDS = int(os.getenv("RAW_COOLDOWN_SECONDS", "120"))
+
+# ── Block Accumulator ─────────────────────────────────────────
+BLOCK_ACCUM_MIN_VOL  = int(os.getenv("BLOCK_ACCUM_MIN_VOL", "300"))
+
+# ── Contract price floor ──────────────────────────────────────
+MIN_CONTRACT_PRICE_FLOOR = float(os.getenv("MIN_CONTRACT_PRICE_FLOOR", "2.0"))
+
+# ── Stream warmup / pending trades ───────────────────────────
+QUOTE_WARMUP_SECONDS          = float(os.getenv("QUOTE_WARMUP_SECONDS", "2.0"))
+PENDING_TRADE_MAX_AGE_SECONDS = float(os.getenv("PENDING_TRADE_MAX_AGE_SECONDS", "5.0"))
+
+# ── Multi-expiry support ──────────────────────────────────────
+MULTI_EXPIRY_COUNT = int(os.getenv("MULTI_EXPIRY_COUNT", "2"))

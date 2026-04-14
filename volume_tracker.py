@@ -10,7 +10,7 @@ evento real del exchange, no un snapshot.
 """
 import logging
 from collections import defaultdict, deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 import config
@@ -27,6 +27,7 @@ class TrackResult:
     vol_delta: int          # contratos en este trade
     vol_1min: int           # total acumulado en 60s
     vol_5min: int           # total acumulado en 300s
+    vol_30s: int = 0        # total acumulado en 30s
     vol_1min_ask: int = 0   # volumen en 60s ejecutado en el ask (price >= ask)
 
 
@@ -35,6 +36,7 @@ class VolumeTracker:
         self._last_total: dict[str, int] = {}
         self._q1:     dict[str, deque] = defaultdict(deque)
         self._q5:     dict[str, deque] = defaultdict(deque)
+        self._q30:    dict[str, deque] = defaultdict(deque)  # 30-second window
         self._q1_ask: dict[str, deque] = defaultdict(deque)  # solo trades en el ask
         self._meta:   dict[str, dict]  = {}
 
@@ -48,7 +50,7 @@ class VolumeTracker:
 
     def add_trade(
         self, symbol: str, size: int, price: float = 0.0, is_ask: bool = False
-    ) -> TrackResult | None:
+    ) -> "TrackResult | None":
         """
         Registra un trade individual del WebSocket (event-driven).
         A diferencia de update(), no calcula delta vs total — recibe el tamaño
@@ -64,13 +66,16 @@ class VolumeTracker:
         event = (now, size, price)
         self._q1[symbol].append(event)
         self._q5[symbol].append(event)
+        self._q30[symbol].append(event)
         if is_ask:
             self._q1_ask[symbol].append(event)
 
-        cutoff1 = now - timedelta(seconds=60)
-        cutoff5 = now - timedelta(seconds=300)
-        _trim(self._q1[symbol], cutoff1)
-        _trim(self._q5[symbol], cutoff5)
+        cutoff1  = now - timedelta(seconds=60)
+        cutoff5  = now - timedelta(seconds=300)
+        cutoff30 = now - timedelta(seconds=30)
+        _trim(self._q1[symbol],    cutoff1)
+        _trim(self._q5[symbol],    cutoff5)
+        _trim(self._q30[symbol],   cutoff30)
         _trim(self._q1_ask[symbol], cutoff1)
 
         meta = self._meta[symbol]
@@ -82,10 +87,11 @@ class VolumeTracker:
             vol_delta=size,
             vol_1min=sum(e[1] for e in self._q1[symbol]),
             vol_5min=sum(e[1] for e in self._q5[symbol]),
+            vol_30s=sum(e[1] for e in self._q30[symbol]),
             vol_1min_ask=sum(e[1] for e in self._q1_ask[symbol]),
         )
 
-    def update(self, symbol: str, total_volume: int) -> TrackResult | None:
+    def update(self, symbol: str, total_volume: int) -> "TrackResult | None":
         """
         Compatibilidad con el sistema REST (Schwab).
         En tasty-alerts usamos add_trade() en su lugar.
@@ -113,8 +119,10 @@ class VolumeTracker:
         event = (now, vol_delta, 0.0)
         self._q1[symbol].append(event)
         self._q5[symbol].append(event)
-        _trim(self._q1[symbol], now - timedelta(seconds=60))
-        _trim(self._q5[symbol], now - timedelta(seconds=300))
+        self._q30[symbol].append(event)
+        _trim(self._q1[symbol],  now - timedelta(seconds=60))
+        _trim(self._q5[symbol],  now - timedelta(seconds=300))
+        _trim(self._q30[symbol], now - timedelta(seconds=30))
 
         meta = self._meta[symbol]
         return TrackResult(
@@ -125,12 +133,23 @@ class VolumeTracker:
             vol_delta=vol_delta,
             vol_1min=sum(e[1] for e in self._q1[symbol]),
             vol_5min=sum(e[1] for e in self._q5[symbol]),
+            vol_30s=sum(e[1] for e in self._q30[symbol]),
         )
 
     def get_vol_1min(self, symbol: str) -> int:
         now = datetime.now()
         cutoff = now - timedelta(seconds=60)
         q = self._q1.get(symbol)
+        if not q:
+            return 0
+        _trim(q, cutoff)
+        return sum(e[1] for e in q)
+
+    def get_vol_30s(self, symbol: str) -> int:
+        """Total acumulado en los últimos 30 segundos."""
+        now = datetime.now()
+        cutoff = now - timedelta(seconds=30)
+        q = self._q30.get(symbol)
         if not q:
             return 0
         _trim(q, cutoff)
@@ -146,7 +165,18 @@ class VolumeTracker:
         _trim(q, cutoff)
         return sum(e[1] for e in q)
 
+    def get_ask_ratio_1min(self, symbol: str) -> float:
+        """Ratio ask_vol_1min / vol_1min. Returns 0.0 if vol_1min == 0."""
+        vol = self.get_vol_1min(symbol)
+        if vol == 0:
+            return 0.0
+        return self.get_ask_vol_1min(symbol) / vol
+
     def get_vol_window(self, symbol: str, seconds: int) -> int:
+        if seconds > 300:
+            raise ValueError(
+                "max window is 300s — use get_vol_30s() or get_vol_1min() for shorter windows"
+            )
         now = datetime.now()
         cutoff = now - timedelta(seconds=seconds)
         q = self._q5.get(symbol)
@@ -175,6 +205,7 @@ class VolumeTracker:
         self._last_total.clear()
         self._q1.clear()
         self._q5.clear()
+        self._q30.clear()
         self._q1_ask.clear()
         self._meta.clear()
 

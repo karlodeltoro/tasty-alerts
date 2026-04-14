@@ -78,7 +78,7 @@ def send_private_message(text: str) -> bool:
 
 def send_sweep_burst(
     direction: str,          # "CALL" o "PUT"
-    contracts: list[dict],   # [{strike, vol_1min, delta, bid, ask, expiry_date}, ...]
+    contracts: list[dict],   # [{strike, vol_1min, ask_ratio, delta, bid, ask, expiry_date}, ...]
     expiry_date: date,
 ) -> bool:
     """Envía alerta de Sweep Burst agrupada a Telegram. Retorna True si fue exitoso."""
@@ -97,17 +97,23 @@ def send_sweep_burst(
         if price >= ask:   return "ASK"
         return "MID"
 
-    contract_lines = "\n".join(
-        f"{int(c['strike'])}{cp}   \u0394 {abs(c['delta']):.2f}   {c['vol_1min']} vol   ${c.get('last_price', 0.0):.2f}  {_side(c['bid'], c['ask'], c.get('last_price', 0.0))}"
-        for c in sorted_contracts
-    )
+    contract_lines = []
+    for c in sorted_contracts:
+        line = (
+            f"{int(c['strike'])}{cp}   \u0394 {abs(c['delta']):.2f}   {c['vol_1min']} vol"
+            f"   ${c.get('last_price', 0.0):.2f}  {_side(c['bid'], c['ask'], c.get('last_price', 0.0))}"
+        )
+        ask_ratio = c.get('ask_ratio', 0.0)
+        if ask_ratio >= 0.6:
+            line += f"  {int(ask_ratio * 100)}% ask-side"
+        contract_lines.append(line)
 
     text = (
         f"*{title}*\n"
         f"\n"
         f"{exp_str}  |  {dte} DTE\n"
         f"{_SEP}\n"
-        f"{contract_lines}\n"
+        f"{chr(10).join(contract_lines)}\n"
         f"{_SEP}\n"
         f"{now_hms} ET  |  via BullCore"
     )
@@ -128,6 +134,7 @@ def send_block_print(
     delta: float,
     iv: float,
     vol_delta: int,
+    ask_ratio: float = 0.0,
 ) -> bool:
     """Envía alerta de Block Print a Telegram. Retorna True si fue exitoso."""
     dte     = (expiry_date - date.today()).days
@@ -141,6 +148,8 @@ def send_block_print(
     elif exec_price >= ask:  side = "ASK"
     else:                    side = "MID"
 
+    ask_line = f"  |  {int(ask_ratio * 100)}% ask-side" if ask_ratio >= 0.6 else ""
+
     text = (
         f"*🖨️ BLOCK PRINT  {label}  {direction}  /ES  {vol_delta} vol*\n"
         f"\n"
@@ -148,13 +157,51 @@ def send_block_print(
         f"{_SEP}\n"
         f"Bid {bid:.2f}  |  Ask {ask:.2f}  |  Exec ${exec_price:.2f}\n"
         f"{_SEP}\n"
-        f"{vol_delta} contratos en el {side}\n"
+        f"{vol_delta} contratos en el {side}{ask_line}\n"
         f"{now_hms} ET  |  via BullCore"
     )
 
     ok = _post({"chat_id": config.TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}, "block print")
     if ok:
         logger.info(f"Telegram BLOCK PRINT OK: {direction} strike {int(strike)} vol {vol_delta}")
+    return ok
+
+
+def send_block_accum(
+    direction: str,       # "CALL" o "PUT"
+    strike: float,
+    expiry_date: date,
+    bid: float,
+    ask: float,
+    delta: float,
+    iv: float,
+    vol_30s: int,
+    ask_ratio: float = 0.0,
+) -> bool:
+    """Envía alerta de Block Accumulator a Telegram. Retorna True si fue exitoso."""
+    dte     = (expiry_date - date.today()).days
+    iv_pct  = int(round(iv * 100))
+    dot     = "🟢" if direction == "CALL" else "🔴"
+    label   = f"{int(strike)}{dot}"
+    exp_str = expiry_date.strftime("%-d %b %Y")
+    now_hms = datetime.now(_ET).strftime("%H:%M:%S")
+
+    ask_line = f"  |  {int(ask_ratio * 100)}% ask-side" if ask_ratio >= 0.6 else ""
+
+    text = (
+        f"*🏦 BLOCK ACCUM  {label}  {direction}  /ES  {vol_30s} vol / 30s*\n"
+        f"\n"
+        f"{exp_str}  |  {dte} DTE  |  \u0394 {abs(delta):.2f}  |  IV {iv_pct}%\n"
+        f"{_SEP}\n"
+        f"Bid {bid:.2f}  |  Ask {ask:.2f}\n"
+        f"{_SEP}\n"
+        f"{vol_30s} contratos en 30s{ask_line}\n"
+        f"{now_hms} ET  |  via BullCore"
+    )
+
+    ok = _post({"chat_id": config.TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}, "block accum")
+    if ok:
+        logger.info(f"Telegram BLOCK ACCUM OK: {direction} strike {int(strike)} vol_30s {vol_30s}")
     return ok
 
 

@@ -104,7 +104,6 @@ Detecta ráfagas coordinadas: múltiples strikes de la **misma dirección** con 
 **Condición de disparo:**
 - ≥ `SWEEP_BURST_MIN_CONTRACTS_B` = **3** contratos distintos
 - Cada uno con ≥ `SWEEP_BURST_MIN_VOL_B` = **50** contratos vol en ask en 60s
-- `|delta|` ≥ `MIN_DELTA` = **0.30**
 
 **Cooldown:** `ALERT_COOLDOWN_SECONDS` = **120s** por dirección (CALL/PUT independiente).
 
@@ -117,9 +116,8 @@ Detecta ráfagas coordinadas: múltiples strikes de la **misma dirección** con 
 Detecta una única transacción ≥ umbral en el T&S. No acumula — una orden, un disparo.
 
 **Lógica de disparo:**
-- Mercado (9:01–17:59 ET): `trade_size` ≥ **150**, `|delta|` ≥ **0.40**
-- Fuera de mercado (18:00–9:00 ET): `trade_size` ≥ **100**, `|delta|` ≥ **0.30**
-- `|delta|` ≤ `BLOCK_PRINT_MAX_DELTA` = **0.90** (ambos horarios)
+- Mercado (9:01–17:59 ET): `trade_size` ≥ **150**
+- Fuera de mercado (18:00–9:00 ET): `trade_size` ≥ **100**
 - Cooldown: `BLOCK_PRINT_COOLDOWN_SECONDS` = **120s** por símbolo
 
 **Evaluación:** event-driven — se llama en cada Trade recibido.
@@ -135,8 +133,6 @@ Detecta flujo sostenido en un único contrato a lo largo del tiempo — acumulac
 - Re-dispara cuando supera `último_vol_disparado + 500`
 - Cooldown: **120s** por símbolo
 
-**Filtro delta (ambas ventanas):** `MIN_DELTA` = **0.30** ≤ `|delta|` ≤ `MAX_DELTA` = **0.95**
-
 **Evaluación:** `_periodic_checks()` cada 15s itera `_active_symbols`.
 
 ---
@@ -147,13 +143,12 @@ Aplicados en `_handle_trades()` antes de pasar al engine:
 
 | Filtro | Variable | Default | Descripción |
 |--------|----------|---------|-------------|
-| Precio mínimo de contrato | `MIN_CONTRACT_PRICE` | `$7.00` | Ignora contratos muy baratos (deep OTM) |
+| Quote recibida | — | — | Si `bid=0` y `ask=0`, el trade se ignora (datos insuficientes) |
+| Precio mínimo de contrato | `MIN_CONTRACT_PRICE` | `$7.00` | Ignora contratos baratos; único gate de calidad |
 | Distancia máxima al strike | `MAX_STRIKE_DISTANCE_PCT` | `15%` | Solo carga strikes dentro del ±15% del precio del futuro |
-| Delta mínimo (Sweep/PC) | `MIN_DELTA` | `0.30` | Filtra opciones muy OTM |
-| Delta máximo (Sweep/PC) | `MAX_DELTA` | `0.95` | Filtra opciones muy ITM (no son flujo especulativo) |
-| Delta mínimo (Block) | `BLOCK_PRINT_MIN_DELTA` | `0.40` | Más estricto para bloques |
-| Delta máximo (Block) | `BLOCK_PRINT_MAX_DELTA` | `0.90` | |
 | Vol máximo por ciclo | `MAX_VOL_DELTA_PER_CYCLE` | `500` | Cap de seguridad contra spikes de data |
+
+**Nota:** El delta **no se usa como filtro de disparo** en ningún trigger. Se muestra en las alertas de Telegram como información, pero no condiciona si el trigger se activa. El precio del contrato (`mark >= $7`) es el único gate de calidad — un contrato a ese precio siempre tiene delta relevante.
 
 ---
 
@@ -200,11 +195,7 @@ Aplicados en `_handle_trades()` antes de pasar al engine:
 | `SWEEP_BURST_MIN_CONTRACTS_B` | `3` | Sweep cond B |
 | `SWEEP_BURST_MIN_VOL_B` | `50` | Sweep cond B |
 | `ALERT_COOLDOWN_SECONDS` | `120` | Sweep |
-| `MIN_DELTA` | `0.30` | Sweep + Pressure Cooker |
-| `MAX_DELTA` | `0.95` | Sweep + Pressure Cooker |
 | `BLOCK_PRINT_MIN_VOL` | `100` | Block Print |
-| `BLOCK_PRINT_MIN_DELTA` | `0.40` | Block Print |
-| `BLOCK_PRINT_MAX_DELTA` | `0.90` | Block Print |
 | `BLOCK_PRINT_COOLDOWN_SECONDS` | `120` | Block Print |
 | `PRESSURE_COOKER_5MIN_VOL` | `500` | Pressure Cooker |
 | `PRESSURE_COOKER_COOLDOWN_SECONDS` | `120` | Pressure Cooker |
@@ -372,6 +363,28 @@ except (KeyboardInterrupt, SystemExit, RuntimeError):
 **Causa:** macOS Sequoia bloquea que `launchd` abra archivos para `StandardOutPath` dentro de `~/Desktop/`. La salida del proceso iba a `/dev/null`.
 
 **Fix:** Mover `StandardOutPath` y `StandardErrorPath` a `~/Library/Logs/bullcore_autorenew.log`. El proceso Python puede escribir en `~/Desktop/` directamente (tiene permisos de usuario), pero `launchd` no puede abrir descriptores de archivo ahí.
+
+### Bug 5 — Delta como filtro bloqueaba trades válidos cuando Greeks no habían llegado (fix aplicado)
+
+**Síntoma:** Block Print (y los otros dos triggers) no disparaban en trades grandes de contratos válidos, especialmente al inicio de la sesión o en contratos con Greeks infrecuentes.
+
+**Causa:** El sistema usaba `delta = 0.0` como default hasta recibir el primer evento `Greeks`. Con `delta = 0.0`, los tres engines fallaban sus filtros de delta mínimo y rechazaban el trade aunque fuera legítimo.
+
+**Fix:** Se eliminó el filtro de delta como condición de disparo en los tres engines (`alert_engine.py`). El delta se sigue mostrando en las alertas de Telegram pero no bloquea ningún trigger. El único gate de calidad es el precio del contrato (`mark >= $7`).
+
+### Bug 6 — Filtro de precio bypaseado cuando Quote no había llegado (fix aplicado)
+
+**Síntoma:** Llegaban alertas de contratos con precio menor a $7.
+
+**Causa:** La condición era `if mark > 0 and mark < MIN_CONTRACT_PRICE`. Cuando `bid=0` y `ask=0` (Quote aún no recibida), `mark = 0.0` y el check `mark > 0` era False, bypaseando el filtro completamente.
+
+**Fix:** Cambiado a `if mark < MIN_CONTRACT_PRICE` — mark=0 también queda filtrado.
+
+### Bug 7 — Trades procesados sin datos de mercado (fix permanente aplicado)
+
+**Síntoma:** Raíz común de los bugs 5 y 6 — trades procesados antes de que llegaran Quote o Greeks para ese contrato.
+
+**Fix:** En `_handle_trades()`, si `bid == 0.0 and ask == 0.0`, el trade se ignora completamente. Se requiere al menos una Quote recibida antes de evaluar cualquier trade del contrato.
 
 ### Nota — Renovación automática de sesión
 

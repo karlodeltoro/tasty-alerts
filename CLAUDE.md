@@ -189,16 +189,14 @@ Aplicados en `_handle_trades()` antes de pasar al engine:
 
 | Variable | Default | Trigger |
 |----------|---------|---------|
-| `SWEEP_BURST_WINDOW_SECONDS` | `60` | Sweep |
-| `SWEEP_BURST_MIN_CONTRACTS` | `5` | Sweep cond A |
-| `SWEEP_BURST_MIN_VOL` | `50` | Sweep cond A |
-| `SWEEP_BURST_MIN_CONTRACTS_B` | `3` | Sweep cond B |
-| `SWEEP_BURST_MIN_VOL_B` | `50` | Sweep cond B |
-| `ALERT_COOLDOWN_SECONDS` | `120` | Sweep |
-| `BLOCK_PRINT_MIN_VOL` | `100` | Block Print |
-| `BLOCK_PRINT_COOLDOWN_SECONDS` | `120` | Block Print |
-| `PRESSURE_COOKER_5MIN_VOL` | `500` | Pressure Cooker |
-| `PRESSURE_COOKER_COOLDOWN_SECONDS` | `120` | Pressure Cooker |
+| `SWEEP_BURST_MIN_CONTRACTS_B` | `3` | Sweep — contratos mínimos con vol ≥ umbral |
+| `SWEEP_BURST_MIN_VOL_B` | `50` | Sweep — vol mínimo por contrato en 60s |
+| `ALERT_COOLDOWN_SECONDS` | `120` | Sweep — cooldown por dirección (CALL/PUT) |
+| `BLOCK_PRINT_MARKET_MIN_VOL` | `150` | Block Print — umbral en horario de mercado (9:01–17:59 ET) |
+| `BLOCK_PRINT_AFTER_HOURS_MIN_VOL` | `100` | Block Print — umbral fuera de mercado (18:00–9:00 ET) |
+| `BLOCK_PRINT_COOLDOWN_SECONDS` | `120` | Block Print — cooldown por símbolo |
+| `PRESSURE_COOKER_5MIN_VOL` | `500` | Pressure Cooker — vol mínimo en ventana de 5min |
+| `PRESSURE_COOKER_COOLDOWN_SECONDS` | `120` | Pressure Cooker — cooldown por símbolo |
 
 ### Filtros de contrato
 

@@ -1,11 +1,13 @@
 """
-alert_engine.py — SweepBurstEngine: detecta ráfagas coordinadas en /ES.
+alert_engine.py — Motores de detección de patrones institucionales.
 
-Un Sweep Burst se dispara cuando ≥N contratos distintos de la MISMA dirección
-(todos CALL o todos PUT) acumulan cada uno ≥V contratos de volumen en una
-ventana deslizante de 60 segundos, con |delta| ≥ MIN_DELTA.
+Sweep Burst: ≥N contratos de la misma dirección acumulan ≥V vol total en 60s.
+Block Print: una sola transacción ≥ umbral (150 mercado / 100 after-hours).
+Pressure Cooker: acumulación sostenida ≥500 contratos en ventana de 5min.
 
-Cooldown: la misma dirección no puede disparar durante ALERT_COOLDOWN_SECONDS.
+Ningún engine usa delta como condición de disparo. El delta se muestra en las
+alertas de Telegram pero no bloquea ningún trigger.
+Cooldowns independientes por dirección (Sweep) o por símbolo (Block/PC).
 """
 import logging
 from datetime import datetime, timedelta
@@ -76,10 +78,8 @@ class PressureCookerEngine:
     Detecta acumulación sostenida en un único contrato:
       - ventana 5min: vol ≥ PRESSURE_COOKER_5MIN_VOL (default 500)
 
-    Filtros delta: MIN_DELTA ≤ |delta| ≤ MAX_DELTA (igual que el resto del sistema).
-
     Umbral incremental: tras disparar, solo re-dispara cuando el vol supera el
-    último vol registrado + threshold (500 para 5min), además del cooldown.
+    último vol registrado + 500, además del cooldown.
     Evita spam del mismo nivel de acumulación.
 
     Cooldown independiente por símbolo.
@@ -134,8 +134,8 @@ class BlockPrintEngine:
     Una orden = un disparo. No acumula volumen.
 
     Horario dual (America/New_York):
-      - Mercado (9:01–17:59): trade_size ≥ 150, |delta| ≥ 0.40
-      - Fuera de mercado (18:00–9:00): trade_size ≥ 100, |delta| ≥ 0.30
+      - Mercado (9:01–17:59): trade_size ≥ BLOCK_PRINT_MARKET_MIN_VOL (150)
+      - Fuera de mercado (18:00–9:00): trade_size ≥ BLOCK_PRINT_AFTER_HOURS_MIN_VOL (100)
     Cooldown: BLOCK_PRINT_COOLDOWN_SECONDS por símbolo.
     """
 
@@ -143,7 +143,7 @@ class BlockPrintEngine:
         self._last_fired: dict[str, datetime] = {}
 
     def check(self, symbol: str, trade_size: int, delta: float, is_market_hours: bool) -> bool:
-        min_vol = 150 if is_market_hours else 100
+        min_vol = config.BLOCK_PRINT_MARKET_MIN_VOL if is_market_hours else config.BLOCK_PRINT_AFTER_HOURS_MIN_VOL
 
         if trade_size < min_vol:
             return False

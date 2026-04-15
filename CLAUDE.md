@@ -116,7 +116,7 @@ Detecta ráfagas coordinadas: múltiples strikes de la **misma dirección** con 
 Detecta una única transacción ≥ umbral en el T&S. No acumula — una orden, un disparo.
 
 **Lógica de disparo:**
-- Mercado (9:01–17:59 ET): `trade_size` ≥ **150**
+- Mercado (9:01–17:59 ET): `trade_size` ≥ **100**
 - Fuera de mercado (18:00–9:00 ET): `trade_size` ≥ **100**
 - Cooldown: `BLOCK_PRINT_COOLDOWN_SECONDS` = **120s** por símbolo
 
@@ -192,7 +192,7 @@ Aplicados en `_handle_trades()` antes de pasar al engine:
 | `SWEEP_BURST_MIN_CONTRACTS_B` | `3` | Sweep — contratos mínimos con vol ≥ umbral |
 | `SWEEP_BURST_MIN_VOL_B` | `50` | Sweep — vol mínimo por contrato en 60s |
 | `ALERT_COOLDOWN_SECONDS` | `120` | Sweep — cooldown por dirección (CALL/PUT) |
-| `BLOCK_PRINT_MARKET_MIN_VOL` | `150` | Block Print — umbral en horario de mercado (9:01–17:59 ET) |
+| `BLOCK_PRINT_MARKET_MIN_VOL` | `100` | Block Print — umbral en horario de mercado (9:01–17:59 ET) |
 | `BLOCK_PRINT_AFTER_HOURS_MIN_VOL` | `100` | Block Print — umbral fuera de mercado (18:00–9:00 ET) |
 | `BLOCK_PRINT_COOLDOWN_SECONDS` | `120` | Block Print — cooldown por símbolo |
 | `PRESSURE_COOKER_5MIN_VOL` | `500` | Pressure Cooker — vol mínimo en ventana de 5min |

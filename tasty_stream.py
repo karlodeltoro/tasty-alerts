@@ -24,6 +24,7 @@ from tastytrade.session import Session
 import config
 import telegram_notifier as tg
 from alert_engine import BlockAccumulatorEngine, BlockPrintEngine, PressureCookerEngine, SweepBurstEngine
+from schwab_stream import MacroContext, SchwabMacroStream
 from volume_tracker import VolumeTracker
 
 logger = logging.getLogger(__name__)
@@ -57,6 +58,9 @@ class TastyAlertSystem:
         self._first_quote_logged: bool = False
         self._first_greeks_logged: bool = False
         self._streamer: DXLinkStreamer | None = None
+        # ── Schwab macro context ──────────────────────────────────
+        self.macro: MacroContext | None = None
+        self._macro_stream: SchwabMacroStream | None = None
         # ── Discard counters (F15) ────────────────────────────────
         self._discarded_no_quote: int = 0
         self._discarded_price_filter: int = 0
@@ -445,6 +449,13 @@ class TastyAlertSystem:
     # Envío de alertas
     # ─────────────────────────────────────────────────────────────
 
+    def _get_macro(self) -> str:
+        """Returns macro context string for alert enrichment, or empty string."""
+        if self._macro_stream is None:
+            return ""
+        ctx = self._macro_stream.get_context()
+        return ctx.format_for_alert()
+
     def _is_market_hours(self) -> bool:
         from datetime import time as dtime
         t = datetime.now(_ET).time()
@@ -466,6 +477,7 @@ class TastyAlertSystem:
             bid=bid, ask=ask, exec_price=exec_price, delta=delta,
             iv=meta.get('iv', 0.0), vol_delta=vol_delta,
             ask_ratio=ask_ratio,
+            macro_context=self._get_macro(),
         )
 
     async def _send_block_accum(self, symbol: str, vol_30s: int, ask_ratio: float) -> None:
@@ -478,6 +490,7 @@ class TastyAlertSystem:
             expiry_date=meta.get('expiry_date', date.today()),
             bid=bid, ask=ask, delta=delta,
             iv=meta.get('iv', 0.0), vol_30s=vol_30s, ask_ratio=ask_ratio,
+            macro_context=self._get_macro(),
         )
 
     async def _send_sweep_burst(self, direction: str, group: list[tuple]) -> None:
@@ -504,7 +517,11 @@ class TastyAlertSystem:
             })
             if expiry_date is None:
                 expiry_date = meta.get('expiry_date')
-        tg.send_sweep_burst(direction=direction, contracts=contracts, expiry_date=expiry_date or date.today())
+        tg.send_sweep_burst(
+            direction=direction, contracts=contracts,
+            expiry_date=expiry_date or date.today(),
+            macro_context=self._get_macro(),
+        )
 
     async def _send_pressure_cooker(self, symbol: str, vol_accumulated: int, minutes: int, tape: list) -> None:
         meta      = self._contract_meta.get(symbol, {})
@@ -518,6 +535,7 @@ class TastyAlertSystem:
             bid=bid, ask=ask, last_price=mark, delta=delta,
             iv=meta.get('iv', 0.0), vol_accumulated=vol_accumulated,
             tape=tape,
+            macro_context=self._get_macro(),
         )
 
     # ─────────────────────────────────────────────────────────────
@@ -637,6 +655,12 @@ class TastyAlertSystem:
                 return
 
             tg.send_startup_message(len(symbols), self._current_expiry)
+
+            # Phase 2 — Start Schwab macro context stream if enabled
+            if config.SCHWAB_ENABLED and self._macro_stream is None:
+                self._macro_stream = SchwabMacroStream()
+                await self._macro_stream.start()
+                logger.info("[SCHWAB] MacroContext stream started")
 
             # F1+F2 — Subscription order: Quote first, warmup, then Greeks, Trade last
             logger.info(f"Registrando suscripción Quote para {len(symbols)} símbolos...")

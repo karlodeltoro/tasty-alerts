@@ -80,6 +80,7 @@ def send_sweep_burst(
     direction: str,          # "CALL" o "PUT"
     contracts: list[dict],   # [{strike, vol_1min, ask_ratio, delta, bid, ask, expiry_date}, ...]
     expiry_date: date,
+    macro_context: str = "",
 ) -> bool:
     """Envía alerta de Sweep Burst agrupada a Telegram. Retorna True si fue exitoso."""
     sorted_contracts = sorted(contracts, key=lambda c: c["strike"])
@@ -108,6 +109,7 @@ def send_sweep_burst(
             line += f"  {int(ask_ratio * 100)}% ask-side"
         contract_lines.append(line)
 
+    macro_line = f"{macro_context}\n" if macro_context else ""
     text = (
         f"*{title}*\n"
         f"\n"
@@ -115,6 +117,7 @@ def send_sweep_burst(
         f"{_SEP}\n"
         f"{chr(10).join(contract_lines)}\n"
         f"{_SEP}\n"
+        f"{macro_line}"
         f"{now_hms} ET  |  via BullCore"
     )
 
@@ -135,6 +138,7 @@ def send_block_print(
     iv: float,
     vol_delta: int,
     ask_ratio: float = 0.0,
+    macro_context: str = "",
 ) -> bool:
     """Envía alerta de Block Print a Telegram. Retorna True si fue exitoso."""
     dte     = (expiry_date - date.today()).days
@@ -149,6 +153,7 @@ def send_block_print(
     else:                    side = "MID"
 
     ask_line = f"  |  {int(ask_ratio * 100)}% ask-side" if ask_ratio >= 0.6 else ""
+    macro_line = f"{macro_context}\n" if macro_context else ""
 
     text = (
         f"*🖨️ BLOCK PRINT  {label}  {direction}  /ES  {vol_delta} vol*\n"
@@ -158,6 +163,7 @@ def send_block_print(
         f"Bid {bid:.2f}  |  Ask {ask:.2f}  |  Exec ${exec_price:.2f}\n"
         f"{_SEP}\n"
         f"{vol_delta} contratos en el {side}{ask_line}\n"
+        f"{macro_line}"
         f"{now_hms} ET  |  via BullCore"
     )
 
@@ -177,6 +183,7 @@ def send_block_accum(
     iv: float,
     vol_30s: int,
     ask_ratio: float = 0.0,
+    macro_context: str = "",
 ) -> bool:
     """Envía alerta de Block Accumulator a Telegram. Retorna True si fue exitoso."""
     dte     = (expiry_date - date.today()).days
@@ -187,6 +194,7 @@ def send_block_accum(
     now_hms = datetime.now(_ET).strftime("%H:%M:%S")
 
     ask_line = f"  |  {int(ask_ratio * 100)}% ask-side" if ask_ratio >= 0.6 else ""
+    macro_line = f"{macro_context}\n" if macro_context else ""
 
     text = (
         f"*🏦 BLOCK ACCUM  {label}  {direction}  /ES  {vol_30s} vol / 30s*\n"
@@ -196,6 +204,7 @@ def send_block_accum(
         f"Bid {bid:.2f}  |  Ask {ask:.2f}\n"
         f"{_SEP}\n"
         f"{vol_30s} contratos en 30s{ask_line}\n"
+        f"{macro_line}"
         f"{now_hms} ET  |  via BullCore"
     )
 
@@ -217,6 +226,7 @@ def send_pressure_cooker(
     iv: float,
     vol_accumulated: int,
     tape: list,           # [(timestamp, size, price), ...]
+    macro_context: str = "",
 ) -> bool:
     """Envía alerta de Pressure Cooker a Telegram. Retorna True si fue exitoso."""
     dte     = (expiry_date - date.today()).days
@@ -241,6 +251,7 @@ def send_pressure_cooker(
     else:
         tape_lines = "Sin datos de tape"
 
+    macro_line = f"{macro_context}\n" if macro_context else ""
     text = (
         f"*{title}*\n"
         f"\n"
@@ -250,6 +261,7 @@ def send_pressure_cooker(
         f"{tape_lines}\n"
         f"{_SEP}\n"
         f"Total  {vol_accumulated} contratos\n"
+        f"{macro_line}"
         f"{now_hms} ET  |  via BullCore"
     )
 

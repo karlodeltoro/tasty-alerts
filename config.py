@@ -100,3 +100,7 @@ SCHWAB_CLIENT_SECRET = os.getenv("SCHWAB_CLIENT_SECRET", "")
 SCHWAB_TOKEN_JSON    = os.getenv("SCHWAB_TOKEN_JSON", "")
 SCHWAB_TOKEN_PATH    = os.getenv("SCHWAB_TOKEN_PATH", "")
 SCHWAB_ENABLED       = os.getenv("SCHWAB_ENABLED", "false").lower() == "true"
+
+# ── API server ────────────────────────────────────────────────
+API_ENABLED = os.getenv("API_ENABLED", "true").lower() == "true"
+API_PORT    = int(os.getenv("PORT", os.getenv("API_PORT", "8000")))

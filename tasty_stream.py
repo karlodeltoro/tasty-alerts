@@ -24,6 +24,7 @@ from tastytrade.session import Session
 import config
 import telegram_notifier as tg
 from alert_engine import BlockAccumulatorEngine, BlockPrintEngine, PressureCookerEngine, SweepBurstEngine
+from alert_store import store, AlertRecord
 from schwab_stream import MacroContext, SchwabMacroStream
 from volume_tracker import VolumeTracker
 
@@ -471,27 +472,59 @@ class TastyAlertSystem:
         mark       = (bid + ask) / 2.0 if (bid + ask) > 0 else 0.0
         exec_price = meta.get('last_trade_price', mark)
         delta      = self.tracker.get_all_meta().get(symbol, {}).get('delta', 0.0)
+        expiry     = meta.get('expiry_date', date.today())
         tg.send_block_print(
             direction=direction, strike=meta.get('strike', 0.0),
-            expiry_date=meta.get('expiry_date', date.today()),
+            expiry_date=expiry,
             bid=bid, ask=ask, exec_price=exec_price, delta=delta,
             iv=meta.get('iv', 0.0), vol_delta=vol_delta,
             ask_ratio=ask_ratio,
             macro_context=self._get_macro(),
         )
+        store.push(AlertRecord(
+            alert_type="BLOCK_PRINT",
+            direction=direction,
+            underlying=meta.get('underlying', '/ES'),
+            strike=meta.get('strike', 0.0),
+            expiry_date=str(expiry),
+            vol=vol_delta,
+            ask_ratio=ask_ratio,
+            delta=delta,
+            iv=meta.get('iv', 0.0),
+            bid=bid,
+            ask=ask,
+            macro_context=self._get_macro(),
+            dte=(expiry - date.today()).days if expiry else 0,
+        ))
 
     async def _send_block_accum(self, symbol: str, vol_30s: int, ask_ratio: float) -> None:
         meta      = self._contract_meta.get(symbol, {})
         direction = 'CALL' if meta.get('is_call') else 'PUT'
         bid, ask  = meta.get('bid', 0.0), meta.get('ask', 0.0)
         delta     = self.tracker.get_all_meta().get(symbol, {}).get('delta', 0.0)
+        expiry    = meta.get('expiry_date', date.today())
         tg.send_block_accum(
             direction=direction, strike=meta.get('strike', 0.0),
-            expiry_date=meta.get('expiry_date', date.today()),
+            expiry_date=expiry,
             bid=bid, ask=ask, delta=delta,
             iv=meta.get('iv', 0.0), vol_30s=vol_30s, ask_ratio=ask_ratio,
             macro_context=self._get_macro(),
         )
+        store.push(AlertRecord(
+            alert_type="BLOCK_ACCUM",
+            direction=direction,
+            underlying=meta.get('underlying', '/ES'),
+            strike=meta.get('strike', 0.0),
+            expiry_date=str(expiry),
+            vol=vol_30s,
+            ask_ratio=ask_ratio,
+            delta=delta,
+            iv=meta.get('iv', 0.0),
+            bid=bid,
+            ask=ask,
+            macro_context=self._get_macro(),
+            dte=(expiry - date.today()).days if expiry else 0,
+        ))
 
     async def _send_sweep_burst(self, direction: str, group: list[tuple]) -> None:
         tracker_meta = self.tracker.get_all_meta()
@@ -522,6 +555,24 @@ class TastyAlertSystem:
             expiry_date=expiry_date or date.today(),
             macro_context=self._get_macro(),
         )
+        if contracts:
+            top = contracts[0]
+            exp = expiry_date or date.today()
+            store.push(AlertRecord(
+                alert_type="SWEEP_BURST",
+                direction=direction,
+                underlying=top.get('underlying', '/ES'),
+                strike=top.get('strike', 0.0),
+                expiry_date=str(exp),
+                vol=sum(c.get('vol_1min', 0) for c in contracts),
+                ask_ratio=top.get('ask_ratio', 0.0),
+                delta=top.get('delta', 0.0),
+                iv=top.get('iv', 0.0),
+                bid=top.get('bid', 0.0),
+                ask=top.get('ask', 0.0),
+                macro_context=self._get_macro(),
+                dte=(exp - date.today()).days,
+            ))
 
     async def _send_pressure_cooker(self, symbol: str, vol_accumulated: int, minutes: int, tape: list) -> None:
         meta      = self._contract_meta.get(symbol, {})
@@ -529,14 +580,30 @@ class TastyAlertSystem:
         bid, ask  = meta.get('bid', 0.0), meta.get('ask', 0.0)
         mark      = (bid + ask) / 2.0 if (bid + ask) > 0 else 0.0
         delta     = self.tracker.get_all_meta().get(symbol, {}).get('delta', 0.0)
+        expiry    = meta.get('expiry_date', date.today())
         tg.send_pressure_cooker(
             minutes=minutes, direction=direction, strike=meta.get('strike', 0.0),
-            expiry_date=meta.get('expiry_date', date.today()),
+            expiry_date=expiry,
             bid=bid, ask=ask, last_price=mark, delta=delta,
             iv=meta.get('iv', 0.0), vol_accumulated=vol_accumulated,
             tape=tape,
             macro_context=self._get_macro(),
         )
+        store.push(AlertRecord(
+            alert_type="PRESSURE_COOKER",
+            direction=direction,
+            underlying=meta.get('underlying', '/ES'),
+            strike=meta.get('strike', 0.0),
+            expiry_date=str(expiry),
+            vol=vol_accumulated,
+            ask_ratio=0.0,
+            delta=delta,
+            iv=meta.get('iv', 0.0),
+            bid=bid,
+            ask=ask,
+            macro_context=self._get_macro(),
+            dte=(expiry - date.today()).days if expiry else 0,
+        ))
 
     # ─────────────────────────────────────────────────────────────
     # Sesión principal

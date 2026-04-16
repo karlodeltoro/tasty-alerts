@@ -20,9 +20,12 @@ import sys
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
+import uvicorn
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
+import config
 import telegram_notifier as tg
+from api import app as fastapi_app
 from tasty_stream import TastyAlertSystem
 import renew_session
 
@@ -168,6 +171,24 @@ async def main() -> None:
         minute=0,
         id="weekend_open",
     )
+
+    if config.API_ENABLED:
+        async def _run_api() -> None:
+            try:
+                api_config = uvicorn.Config(
+                    fastapi_app,
+                    host="0.0.0.0",
+                    port=config.API_PORT,
+                    log_level="warning",
+                    loop="none",  # use existing event loop
+                )
+                api_server = uvicorn.Server(api_config)
+                await api_server.serve()
+            except Exception as e:
+                logger.error(f"API server error: {e}")
+
+        asyncio.create_task(_run_api(), name="api_server")
+        logger.info(f"API server started on port {config.API_PORT}")
 
     scheduler.start()
     logger.info(

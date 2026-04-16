@@ -93,3 +93,10 @@ PENDING_TRADE_MAX_AGE_SECONDS = float(os.getenv("PENDING_TRADE_MAX_AGE_SECONDS",
 
 # ── Multi-expiry support ──────────────────────────────────────
 MULTI_EXPIRY_COUNT = int(os.getenv("MULTI_EXPIRY_COUNT", "2"))
+
+# ── Schwab MacroContext ───────────────────────────────────────
+SCHWAB_CLIENT_ID     = os.getenv("SCHWAB_CLIENT_ID", "")
+SCHWAB_CLIENT_SECRET = os.getenv("SCHWAB_CLIENT_SECRET", "")
+SCHWAB_TOKEN_JSON    = os.getenv("SCHWAB_TOKEN_JSON", "")
+SCHWAB_TOKEN_PATH    = os.getenv("SCHWAB_TOKEN_PATH", "")
+SCHWAB_ENABLED       = os.getenv("SCHWAB_ENABLED", "false").lower() == "true"

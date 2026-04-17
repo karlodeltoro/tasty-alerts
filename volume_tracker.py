@@ -38,6 +38,7 @@ class VolumeTracker:
         self._q5:     dict[str, deque] = defaultdict(deque)
         self._q30:    dict[str, deque] = defaultdict(deque)  # 30-second window
         self._q1_ask: dict[str, deque] = defaultdict(deque)  # solo trades en el ask
+        self._q2_agg: dict[str, deque] = defaultdict(deque)  # 2-min aggressive (at/above ask)
         self._meta:   dict[str, dict]  = {}
 
     def register(self, symbol: str, underlying: str, contract_type: str, delta: float) -> None:
@@ -49,13 +50,15 @@ class VolumeTracker:
         }
 
     def add_trade(
-        self, symbol: str, size: int, price: float = 0.0, is_ask: bool = False
+        self, symbol: str, size: int, price: float = 0.0,
+        is_ask: bool = False, ask_price: float = 0.0
     ) -> "TrackResult | None":
         """
         Registra un trade individual del WebSocket (event-driven).
         A diferencia de update(), no calcula delta vs total — recibe el tamaño
         real del trade directamente del exchange.
         is_ask=True cuando trade.price >= ask del contrato en ese momento.
+        ask_price: current ask for above-ask aggressive detection.
         """
         if symbol not in self._meta:
             return None
@@ -70,13 +73,20 @@ class VolumeTracker:
         if is_ask:
             self._q1_ask[symbol].append(event)
 
+        # Aggressive = at ask OR strictly above ask
+        is_aggressive = is_ask or (price > 0 and ask_price > 0 and price > ask_price)
+        if is_aggressive:
+            self._q2_agg[symbol].append(event)
+
         cutoff1  = now - timedelta(seconds=60)
         cutoff5  = now - timedelta(seconds=300)
         cutoff30 = now - timedelta(seconds=30)
+        cutoff2a = now - timedelta(seconds=120)
         _trim(self._q1[symbol],    cutoff1)
         _trim(self._q5[symbol],    cutoff5)
         _trim(self._q30[symbol],   cutoff30)
         _trim(self._q1_ask[symbol], cutoff1)
+        _trim(self._q2_agg[symbol], cutoff2a)
 
         meta = self._meta[symbol]
         return TrackResult(
@@ -165,6 +175,16 @@ class VolumeTracker:
         _trim(q, cutoff)
         return sum(e[1] for e in q)
 
+    def get_vol_2min_aggressive(self, symbol: str) -> int:
+        """Volume in last 120s executed at or above ask."""
+        now = datetime.now()
+        cutoff = now - timedelta(seconds=120)
+        q = self._q2_agg.get(symbol)
+        if not q:
+            return 0
+        _trim(q, cutoff)
+        return sum(e[1] for e in q)
+
     def get_ask_ratio_1min(self, symbol: str) -> float:
         """Ratio ask_vol_1min / vol_1min. Returns 0.0 if vol_1min == 0."""
         vol = self.get_vol_1min(symbol)
@@ -207,6 +227,7 @@ class VolumeTracker:
         self._q5.clear()
         self._q30.clear()
         self._q1_ask.clear()
+        self._q2_agg.clear()
         self._meta.clear()
 
 

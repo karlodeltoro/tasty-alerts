@@ -293,7 +293,8 @@ class TastyAlertSystem:
             return
 
         meta['last_trade_price'] = price
-        result = self.tracker.add_trade(sym, size, price, is_ask=is_ask)
+        ask_price = meta.get('ask', 0.0)
+        result = self.tracker.add_trade(sym, size, price, is_ask=is_ask, ask_price=ask_price)
         if not result:
             return
 
@@ -315,7 +316,10 @@ class TastyAlertSystem:
             ask_ratio   = self.tracker.get_ask_ratio_1min(sym)
 
             # Block Print (single large fill)
-            if self.block_engine.check(sym, size, trade_delta, self._is_market_hours()):
+            exec_price = price
+            ask_price  = meta.get('ask', 0.0)
+            if self.block_engine.check(sym, size, trade_delta, self._is_market_hours(),
+                                       exec_price=exec_price, ask_price=ask_price):
                 asyncio.create_task(self._send_block_print(sym, size, ask_ratio))
 
             # Block Accumulator (rolling 30s)
@@ -326,7 +330,9 @@ class TastyAlertSystem:
             # Sweep Burst — event-driven (F5)
             vol_snapshot  = {s: self.tracker.get_vol_1min(s) for s in self._active_symbols}
             ask_snapshot  = {s: self.tracker.get_ask_ratio_1min(s) for s in self._active_symbols}
-            burst = self.engine.check(vol_snapshot, self.tracker.get_all_meta(), ask_snapshot)
+            agg_snapshot  = {s: self.tracker.get_vol_2min_aggressive(s) for s in self._active_symbols}
+            burst = self.engine.check(vol_snapshot, self.tracker.get_all_meta(),
+                                      ask_snapshot, agg_snapshot)
             if burst:
                 direction, group = burst
                 asyncio.create_task(self._send_sweep_burst(direction, group))

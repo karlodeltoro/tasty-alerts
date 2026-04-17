@@ -35,20 +35,22 @@ class SweepBurstEngine:
         vol_snapshot: dict[str, int],      # symbol → vol total acumulado en 60s
         tracker_meta: dict[str, dict],     # symbol → {underlying, contract_type, delta}
         ask_ratio_snapshot: dict[str, float] | None = None,  # symbol → ask_ratio (F10)
+        aggressive_2min_snapshot: dict[str, int] | None = None,  # symbol → aggressive vol 2min
     ) -> tuple[str, list[tuple[str, int, float]]] | None:
         """
         Evalúa si se cumple la condición de Sweep Burst.
         Retorna (direction, [(symbol, vol, ask_ratio), ...]) ordenado por vol desc, o None.
 
-        Condición: ≥ SWEEP_BURST_MIN_CONTRACTS_B contratos con vol_total ≥ SWEEP_BURST_MIN_VOL_B
-                   (acumulación de volumen total en 60s, independiente de ask/bid)
+        Condición: ≥ SWEEP_BURST_MIN_CONTRACTS_B contratos con aggressive_2min_vol ≥ SWEEP_BURST_MIN_VOL_B
+                   Falls back to vol_snapshot if aggressive_2min_snapshot is None.
         """
         ask_ratios = ask_ratio_snapshot or {}
+        agg = aggressive_2min_snapshot or vol_snapshot
 
         calls: list[tuple[str, int, float]] = []
         puts:  list[tuple[str, int, float]] = []
 
-        for sym, vol in vol_snapshot.items():
+        for sym, vol in agg.items():
             meta = tracker_meta.get(sym)
             if not meta:
                 continue
@@ -183,11 +185,29 @@ class BlockPrintEngine:
     def __init__(self) -> None:
         self._last_fired: dict[str, datetime] = {}
 
-    def check(self, symbol: str, trade_size: int, delta: float, is_market_hours: bool) -> bool:
-        min_vol = config.BLOCK_PRINT_MARKET_MIN_VOL if is_market_hours else config.BLOCK_PRINT_AFTER_HOURS_MIN_VOL
+    def check(
+        self, symbol: str, trade_size: int, delta: float,
+        is_market_hours: bool, exec_price: float = 0.0, ask_price: float = 0.0
+    ) -> bool:
+        if is_market_hours:
+            if trade_size >= config.BLOCK_PRINT_MARKET_MIN_VOL:
+                # 200+ contracts — fire regardless of execution price
+                pass
+            elif trade_size >= config.BLOCK_PRINT_MEDIUM_MIN_VOL:
+                # 150-199 contracts — require price >= ask
+                if exec_price < ask_price:
+                    return False
+            elif trade_size >= config.BLOCK_PRINT_SMALL_MIN_VOL:
+                # 100-149 contracts — require price strictly above ask
+                if exec_price <= ask_price:
+                    return False
+            else:
+                # Below 100 contracts during market hours — never fire
+                return False
+        else:
+            if trade_size < config.BLOCK_PRINT_AFTER_HOURS_MIN_VOL:
+                return False
 
-        if trade_size < min_vol:
-            return False
         if not self._can_fire(symbol):
             return False
 

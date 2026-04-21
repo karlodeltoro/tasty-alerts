@@ -1,4 +1,5 @@
 .env
+scripts/.env
 session.json
 alerts.log
 venv/

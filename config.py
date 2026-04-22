@@ -108,3 +108,4 @@ SCHWAB_ENABLED       = os.getenv("SCHWAB_ENABLED", "false").lower() == "true"
 # ── API server ────────────────────────────────────────────────
 API_ENABLED = os.getenv("API_ENABLED", "true").lower() == "true"
 API_PORT    = int(os.getenv("PORT", os.getenv("API_PORT", "8000")))
+API_KEY     = os.getenv("BULLCORE_API_KEY", "")  # empty = open access (dev mode)

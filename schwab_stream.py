@@ -83,19 +83,21 @@ class MacroContext:
         return prefix + " | ".join(parts)
 
 
+_TOKEN_TEMP_PATH = os.path.join(tempfile.gettempdir(), "schwab_token_tastyalerts.json")
+
+
 def _resolve_token_path() -> str:
     """
     Resolve the Schwab token file path.
-    - SCHWAB_TOKEN_JSON: write JSON string to a tempfile and return path
+    - SCHWAB_TOKEN_JSON: write to a fixed path (overwritten each reconnect, never accumulates)
     - SCHWAB_TOKEN_PATH: return path directly
     - Neither set: raise EnvironmentError
     """
     token_json = os.environ.get("SCHWAB_TOKEN_JSON", "")
     if token_json:
-        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
-        tmp.write(token_json)
-        tmp.close()
-        return tmp.name
+        with open(_TOKEN_TEMP_PATH, "w") as f:
+            f.write(token_json)
+        return _TOKEN_TEMP_PATH
 
     token_path = os.environ.get("SCHWAB_TOKEN_PATH", "")
     if token_path:

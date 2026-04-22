@@ -92,7 +92,7 @@ async def main() -> None:
     if _is_weekend_now():
         _weekend.set()
         logger.info("Arranque en fin de semana — stream pausado hasta domingo 18:00 ET")
-        tg.send_private_message(
+        await tg.send_private_message(
             "⏸ *BullCore Capital* — arranque en fin de semana\n"
             "Stream inactivo hasta el domingo 18:00 ET"
         )
@@ -102,7 +102,7 @@ async def main() -> None:
     async def _enter_weekend() -> None:
         """Viernes 18:00 ET — pausa el stream hasta el domingo."""
         logger.info("=== Fin de semana: cerrando stream ===")
-        tg.send_private_message(
+        await tg.send_private_message(
             "⏸ *Sistema pausado* — mercado cerrado\n"
             "Reanuda el *domingo a las 6:00 PM ET*"
         )
@@ -116,7 +116,7 @@ async def main() -> None:
     async def _exit_weekend() -> None:
         """Domingo 18:00 ET — reanuda el stream."""
         logger.info("=== Reanudando stream (domingo 18:00 ET) ===")
-        tg.send_private_message("▶️ *Sistema reanudado* — mercado abierto")
+        await tg.send_private_message("▶️ *Sistema reanudado* — mercado abierto")
         _weekend.clear()
 
     # ── Scheduler ────────────────────────────────────────────────

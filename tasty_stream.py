@@ -309,7 +309,8 @@ class TastyAlertSystem:
                         direction = 'CALL' if meta.get('is_call') else 'PUT'
                         if meta.get('expiry_date'):
                             asyncio.create_task(self._send_raw_alert(
-                                direction, meta['strike'], meta['expiry_date'], vol_1min, mark
+                                direction, meta['strike'], meta['expiry_date'], vol_1min, mark,
+                                meta.get('underlying', '/ES'),
                             ))
         else:
             trade_delta = self.tracker.get_all_meta().get(sym, {}).get('delta', 0.0)
@@ -468,8 +469,8 @@ class TastyAlertSystem:
         t = datetime.now(_ET).time()
         return dtime(9, 1) <= t <= dtime(17, 59)
 
-    async def _send_raw_alert(self, direction, strike, expiry, vol_1min, mark):
-        tg.send_raw_alert(direction, strike, expiry, vol_1min, mark)
+    async def _send_raw_alert(self, direction, strike, expiry, vol_1min, mark, underlying: str = "/ES"):
+        await tg.send_raw_alert(direction, strike, expiry, vol_1min, mark, underlying=underlying)
 
     async def _send_block_print(self, symbol: str, vol_delta: int, ask_ratio: float = 0.0) -> None:
         meta       = self._contract_meta.get(symbol, {})
@@ -479,12 +480,13 @@ class TastyAlertSystem:
         exec_price = meta.get('last_trade_price', mark)
         delta      = self.tracker.get_all_meta().get(symbol, {}).get('delta', 0.0)
         expiry     = meta.get('expiry_date', date.today())
-        tg.send_block_print(
+        await tg.send_block_print(
             direction=direction, strike=meta.get('strike', 0.0),
             expiry_date=expiry,
             bid=bid, ask=ask, exec_price=exec_price, delta=delta,
             iv=meta.get('iv', 0.0), vol_delta=vol_delta,
             ask_ratio=ask_ratio,
+            underlying=meta.get('underlying', '/ES'),
             macro_context=self._get_macro(),
         )
         store.push(AlertRecord(
@@ -509,11 +511,12 @@ class TastyAlertSystem:
         bid, ask  = meta.get('bid', 0.0), meta.get('ask', 0.0)
         delta     = self.tracker.get_all_meta().get(symbol, {}).get('delta', 0.0)
         expiry    = meta.get('expiry_date', date.today())
-        tg.send_block_accum(
+        await tg.send_block_accum(
             direction=direction, strike=meta.get('strike', 0.0),
             expiry_date=expiry,
             bid=bid, ask=ask, delta=delta,
             iv=meta.get('iv', 0.0), vol_30s=vol_30s, ask_ratio=ask_ratio,
+            underlying=meta.get('underlying', '/ES'),
             macro_context=self._get_macro(),
         )
         store.push(AlertRecord(
@@ -546,6 +549,7 @@ class TastyAlertSystem:
             last_price = meta.get('last_trade_price', (bid + ask) / 2.0 if (bid + ask) > 0 else 0.0)
             contracts.append({
                 'strike':      meta.get('strike', 0),
+                'underlying':  meta.get('underlying', '/ES'),
                 'vol_1min':    vol_1min,
                 'ask_ratio':   ask_ratio,
                 'delta':       tracker_meta.get(sym, {}).get('delta', 0.0),
@@ -556,9 +560,11 @@ class TastyAlertSystem:
             })
             if expiry_date is None:
                 expiry_date = meta.get('expiry_date')
-        tg.send_sweep_burst(
+        sweep_underlying = contracts[0].get('underlying', '/ES') if contracts else '/ES'
+        await tg.send_sweep_burst(
             direction=direction, contracts=contracts,
             expiry_date=expiry_date or date.today(),
+            underlying=sweep_underlying,
             macro_context=self._get_macro(),
         )
         if contracts:
@@ -587,12 +593,13 @@ class TastyAlertSystem:
         mark      = (bid + ask) / 2.0 if (bid + ask) > 0 else 0.0
         delta     = self.tracker.get_all_meta().get(symbol, {}).get('delta', 0.0)
         expiry    = meta.get('expiry_date', date.today())
-        tg.send_pressure_cooker(
+        await tg.send_pressure_cooker(
             minutes=minutes, direction=direction, strike=meta.get('strike', 0.0),
             expiry_date=expiry,
             bid=bid, ask=ask, last_price=mark, delta=delta,
             iv=meta.get('iv', 0.0), vol_accumulated=vol_accumulated,
             tape=tape,
+            underlying=meta.get('underlying', '/ES'),
             macro_context=self._get_macro(),
         )
         store.push(AlertRecord(
@@ -727,7 +734,7 @@ class TastyAlertSystem:
                 logger.error("No se cargaron contratos — abortando run_session().")
                 return
 
-            tg.send_startup_message(len(symbols), self._current_expiry)
+            await tg.send_startup_message(len(symbols), self._current_expiry)
 
             # Phase 2 — Start Schwab macro context stream if enabled
             if config.SCHWAB_ENABLED and self._macro_stream is None:
@@ -781,7 +788,7 @@ class TastyAlertSystem:
             new_symbols = await self.load_chain(session, self._streamer)
             if not new_symbols:
                 logger.error("reload_chain(): load_chain() devolvió 0 contratos")
-                tg.send_reload_message(0, self._current_expiry)
+                await tg.send_reload_message(0, self._current_expiry, underlying=", ".join(config.WATCH_SYMBOLS))
                 return
 
             logger.info(f"Re-suscribiendo {len(new_symbols)} contratos en streamer principal...")
@@ -797,13 +804,13 @@ class TastyAlertSystem:
             self._reloading = False
             self._drain_pending()
 
-        tg.send_reload_message(len(new_symbols), self._current_expiry)
+        await tg.send_reload_message(len(new_symbols), self._current_expiry, underlying=", ".join(config.WATCH_SYMBOLS))
         logger.info(f"=== reload_chain() completado: {len(new_symbols)} contratos activos ===")
 
     async def verify_stream(self) -> None:
         if self._active_symbols:
             logger.info(f"Verificación 18:05 OK — {len(self._active_symbols)} contratos")
-            tg.send_stream_verification_message(self._active_symbols)
+            await tg.send_stream_verification_message(self._active_symbols)
         else:
             logger.warning("Sin contratos activos, forzando recarga...")
             await self.reload_chain()

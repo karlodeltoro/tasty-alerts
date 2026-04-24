@@ -293,6 +293,8 @@ class TastyAlertSystem:
             return
 
         meta['last_trade_price'] = price
+        meta['last_trade_bid']   = bid   # snapshot at trade time — prevents stale-quote mismatch
+        meta['last_trade_ask']   = ask
         ask_price = meta.get('ask', 0.0)
         result = self.tracker.add_trade(sym, size, price, is_ask=is_ask, ask_price=ask_price)
         if not result:
@@ -475,7 +477,8 @@ class TastyAlertSystem:
     async def _send_block_print(self, symbol: str, vol_delta: int, ask_ratio: float = 0.0) -> None:
         meta       = self._contract_meta.get(symbol, {})
         direction  = 'CALL' if meta.get('is_call') else 'PUT'
-        bid, ask   = meta.get('bid', 0.0), meta.get('ask', 0.0)
+        bid        = meta.get('last_trade_bid', meta.get('bid', 0.0))
+        ask        = meta.get('last_trade_ask', meta.get('ask', 0.0))
         mark       = (bid + ask) / 2.0 if (bid + ask) > 0 else 0.0
         exec_price = meta.get('last_trade_price', mark)
         delta      = self.tracker.get_all_meta().get(symbol, {}).get('delta', 0.0)
@@ -544,8 +547,8 @@ class TastyAlertSystem:
             vol_1min = item[1]
             ask_ratio = item[2] if len(item) > 2 else 0.0
             meta = self._contract_meta.get(sym, {})
-            bid = meta.get('bid', 0.0)
-            ask = meta.get('ask', 0.0)
+            bid = meta.get('last_trade_bid', meta.get('bid', 0.0))
+            ask = meta.get('last_trade_ask', meta.get('ask', 0.0))
             last_price = meta.get('last_trade_price', (bid + ask) / 2.0 if (bid + ask) > 0 else 0.0)
             contracts.append({
                 'strike':      meta.get('strike', 0),

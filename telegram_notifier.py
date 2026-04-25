@@ -128,6 +128,7 @@ async def send_sweep_burst(
     expiry_date: date,
     underlying: str = "/ES",
     macro_context: str = "",
+    schwab_enrichment_lines: list[str] | None = None,
 ) -> bool:
     """Envía alerta de Sweep Burst agrupada a Telegram."""
     sorted_contracts = sorted(contracts, key=lambda c: c["strike"])
@@ -145,8 +146,18 @@ async def send_sweep_burst(
         if price >= ask: return "ASK"
         return "MID"
 
+    # Build enrichment lookup by original index (before sort)
+    enrich_by_idx: dict[int, str] = {}
+    if schwab_enrichment_lines:
+        for idx, line in enumerate(schwab_enrichment_lines):
+            if line:
+                enrich_by_idx[idx] = line
+
+    # Sort with original index preserved
+    indexed_contracts = sorted(enumerate(contracts), key=lambda x: x[1]["strike"])
+
     contract_lines = []
-    for c in sorted_contracts:
+    for orig_idx, c in indexed_contracts:
         line = (
             f"{int(c['strike'])}{cp}   Δ {abs(c['delta']):.2f}   {c['vol_1min']} vol"
             f"   ${c.get('last_price', 0.0):.2f}  "
@@ -156,6 +167,9 @@ async def send_sweep_burst(
         if ask_ratio >= 0.6:
             line += f"  {int(ask_ratio * 100)}% ask-side"
         contract_lines.append(line)
+        enrichment = enrich_by_idx.get(orig_idx, "")
+        if enrichment:
+            contract_lines.append(enrichment)
 
     macro_line = f"{macro_context}\n" if macro_context else ""
     text = (
@@ -190,6 +204,7 @@ async def send_block_print(
     ask_ratio: float = 0.0,
     underlying: str = "/ES",
     macro_context: str = "",
+    schwab_enrichment: str = "",
 ) -> bool:
     """Envía alerta de Block Print a Telegram."""
     dte     = (expiry_date - date.today()).days
@@ -203,8 +218,9 @@ async def send_block_print(
     elif exec_price >= ask: side = "ASK"
     else:                   side = "MID"
 
-    ask_line   = f"  |  {int(ask_ratio * 100)}% ask-side" if ask_ratio >= 0.6 else ""
-    macro_line = f"{macro_context}\n" if macro_context else ""
+    ask_line      = f"  |  {int(ask_ratio * 100)}% ask-side" if ask_ratio >= 0.6 else ""
+    schwab_line   = f"{schwab_enrichment}\n" if schwab_enrichment else ""
+    macro_line    = f"{macro_context}\n" if macro_context else ""
 
     text = (
         f"*🖨️ BLOCK PRINT  {label}  {direction}  {underlying}  {vol_delta} vol*\n"
@@ -214,6 +230,7 @@ async def send_block_print(
         f"Bid {bid:.2f}  |  Ask {ask:.2f}  |  Exec ${exec_price:.2f}\n"
         f"{_SEP}\n"
         f"{vol_delta} contratos en el {side}{ask_line}\n"
+        f"{schwab_line}"
         f"{macro_line}"
         f"{now_hms} ET  |  via BullCore"
     )
@@ -238,6 +255,7 @@ async def send_block_accum(
     ask_ratio: float = 0.0,
     underlying: str = "/ES",
     macro_context: str = "",
+    schwab_enrichment: str = "",
 ) -> bool:
     """Envía alerta de Block Accumulator a Telegram."""
     dte     = (expiry_date - date.today()).days
@@ -247,8 +265,9 @@ async def send_block_accum(
     exp_str = expiry_date.strftime("%-d %b %Y")
     now_hms = datetime.now(_ET).strftime("%H:%M:%S")
 
-    ask_line   = f"  |  {int(ask_ratio * 100)}% ask-side" if ask_ratio >= 0.6 else ""
-    macro_line = f"{macro_context}\n" if macro_context else ""
+    ask_line    = f"  |  {int(ask_ratio * 100)}% ask-side" if ask_ratio >= 0.6 else ""
+    schwab_line = f"{schwab_enrichment}\n" if schwab_enrichment else ""
+    macro_line  = f"{macro_context}\n" if macro_context else ""
 
     text = (
         f"*🏦 BLOCK ACCUM  {label}  {direction}  {underlying}  {vol_30s} vol / 30s*\n"
@@ -258,6 +277,7 @@ async def send_block_accum(
         f"Bid {bid:.2f}  |  Ask {ask:.2f}\n"
         f"{_SEP}\n"
         f"{vol_30s} contratos en 30s{ask_line}\n"
+        f"{schwab_line}"
         f"{macro_line}"
         f"{now_hms} ET  |  via BullCore"
     )
@@ -284,6 +304,7 @@ async def send_pressure_cooker(
     tape: list,
     underlying: str = "/ES",
     macro_context: str = "",
+    schwab_enrichment: str = "",
 ) -> bool:
     """Envía alerta de Pressure Cooker a Telegram."""
     dte     = (expiry_date - date.today()).days
@@ -307,7 +328,8 @@ async def send_pressure_cooker(
     else:
         tape_lines = "Sin datos de tape"
 
-    macro_line = f"{macro_context}\n" if macro_context else ""
+    schwab_line = f"{schwab_enrichment}\n" if schwab_enrichment else ""
+    macro_line  = f"{macro_context}\n" if macro_context else ""
     text = (
         f"*{title}*\n"
         f"\n"
@@ -317,6 +339,7 @@ async def send_pressure_cooker(
         f"{tape_lines}\n"
         f"{_SEP}\n"
         f"Total  {vol_accumulated} contratos\n"
+        f"{schwab_line}"
         f"{macro_line}"
         f"{now_hms} ET  |  via BullCore"
     )
@@ -469,3 +492,72 @@ def send_session_json_manual_update(new_b64: str, expiration: object) -> None:
             {"text": f"TT_SESSION_JSON:\n\n`{chunk}`", "parse_mode": "Markdown"},
             f"session json chunk {idx}",
         )
+
+
+async def send_schwab_candidate(
+    direction: str,
+    strike: float,
+    expiry_date: date,
+    underlying: str,
+    schwab_vol: int,
+    schwab_velocity_1m: float,
+    schwab_velocity_5m: float,
+    vol_oi_ratio: float,
+    schwab_reason: str,
+    tt_tape: list,
+    tt_ask_ratio: float,
+    tt_vol_2min: int,
+    bid: float,
+    ask: float,
+    delta: float,
+    iv: float,
+    macro_context: str = "",
+) -> bool:
+    """Alert for Schwab-detected volume candidate confirmed by TT T&S."""
+    dte     = (expiry_date - date.today()).days
+    iv_pct  = int(round(iv * 100))
+    dot     = "🟢" if direction == "CALL" else "🔴"
+    label   = f"{int(strike)}{dot}"
+    exp_str = expiry_date.strftime("%-d %b %Y")
+    now_hms = datetime.now(_ET).strftime("%H:%M:%S")
+
+    # TT tape summary
+    if tt_tape:
+        def _side(price):
+            if price <= bid:   return "BID"
+            if price >= ask:   return "ASK"
+            return "MID"
+        tape_lines = "\n".join(
+            f"{ts.strftime('%H:%M:%S')}  {size} @ ${price:.2f}  {_side(price)}"
+            for ts, size, price in tt_tape[-6:]
+        )
+        tt_line = f"TT T&S ({tt_vol_2min} vol 2m | {int(tt_ask_ratio*100)}% ask):\n{tape_lines}"
+    else:
+        tt_line = f"TT T&S: {tt_vol_2min} vol 2m | {int(tt_ask_ratio*100)}% ask-side"
+
+    vel_str = f"+{int(schwab_velocity_1m)}/min"
+    if schwab_velocity_5m > 0:
+        accel = schwab_velocity_1m / schwab_velocity_5m
+        vel_str += f" ({accel:.1f}× accel)"
+    macro_line = f"{macro_context}\n" if macro_context else ""
+
+    text = (
+        f"*🔔 SCHWAB CANDIDATE  {label}  {direction}  {underlying}*\n"
+        f"\n"
+        f"{exp_str}  |  {dte} DTE  |  Δ {abs(delta):.2f}  |  IV {iv_pct}%\n"
+        f"{_SEP}\n"
+        f"Schwab SPX: {schwab_vol:,} vol  {vel_str}  |  {vol_oi_ratio:.1f}×OI\n"
+        f"Razón: {schwab_reason}\n"
+        f"{_SEP}\n"
+        f"{tt_line}\n"
+        f"{_SEP}\n"
+        f"{macro_line}"
+        f"{now_hms} ET  |  via BullCore"
+    )
+    ok = await _post(
+        {"chat_id": config.TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"},
+        "schwab candidate",
+    )
+    if ok:
+        logger.info(f"Telegram SCHWAB CANDIDATE OK: {direction} {int(strike)} vol {schwab_vol}")
+    return ok

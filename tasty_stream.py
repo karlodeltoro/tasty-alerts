@@ -240,6 +240,26 @@ class TastyAlertSystem:
 
         self._active_symbols = all_symbols
         logger.info(f"=== load_chain() completado: {len(all_symbols)} contratos totales ===")
+
+        # Subscribe option contracts to Schwab monitor
+        if self._macro_stream is not None and all_symbols:
+            from symbol_mapper import tt_meta_to_schwab_symbol
+            schwab_syms = []
+            for sym in all_symbols:
+                meta = self._contract_meta.get(sym)
+                if meta:
+                    ss = tt_meta_to_schwab_symbol(meta)
+                    if ss:
+                        schwab_syms.append(ss)
+                        # Store reverse mapping
+                        meta['schwab_symbol'] = ss
+            if schwab_syms:
+                unique_schwab = list(dict.fromkeys(schwab_syms))
+                asyncio.create_task(
+                    self._macro_stream.subscribe_options(unique_schwab)
+                )
+                logger.info(f"[SCHWAB] Queued {len(unique_schwab)} option subscriptions")
+
         return all_symbols
 
     # ─────────────────────────────────────────────────────────────
@@ -455,6 +475,25 @@ class TastyAlertSystem:
                     tape = self.tracker.get_tape(sym, 300)
                     asyncio.create_task(self._send_pressure_cooker(sym, vol_5min, 5, tape))
 
+            # Check Schwab contract candidates → confirm with TT T&S
+            if self._macro_stream and not config.RAW_ALERT_MODE:
+                candidates = self._macro_stream.get_contract_candidates()
+                for cand in candidates:
+                    tt_sym = self._find_tt_symbol_for_strike(
+                        cand.snapshot.strike,
+                        cand.snapshot.expiry,
+                        cand.snapshot.opt_type,
+                    )
+                    if tt_sym:
+                        tape       = self.tracker.get_tape(tt_sym, 120)
+                        ask_ratio  = self.tracker.get_ask_ratio_1min(tt_sym)
+                        vol_2min   = self.tracker.get_vol_window(tt_sym, 120)
+                        if len(tape) >= 2 or vol_2min >= 20:
+                            meta = self._contract_meta.get(tt_sym, {})
+                            asyncio.create_task(self._send_schwab_candidate(
+                                cand, tt_sym, tape, ask_ratio, vol_2min, meta
+                            ))
+
     # ─────────────────────────────────────────────────────────────
     # Envío de alertas
     # ─────────────────────────────────────────────────────────────
@@ -465,6 +504,18 @@ class TastyAlertSystem:
             return ""
         ctx = self._macro_stream.get_context()
         return ctx.format_for_alert()
+
+    def _get_schwab_enrichment(self, symbol: str) -> str:
+        """Get Schwab volume enrichment for a specific TT contract symbol."""
+        if self._macro_stream is None:
+            return ""
+        meta = self._contract_meta.get(symbol, {})
+        strike   = meta.get('strike', 0.0)
+        expiry   = meta.get('expiry_date')
+        opt_type = 'C' if meta.get('is_call') else 'P'
+        if not expiry:
+            return ""
+        return self._macro_stream.get_contract_enrichment(float(strike), expiry, opt_type)
 
     def _is_market_hours(self) -> bool:
         from datetime import time as dtime
@@ -483,6 +534,7 @@ class TastyAlertSystem:
         exec_price = meta.get('last_trade_price', mark)
         delta      = self.tracker.get_all_meta().get(symbol, {}).get('delta', 0.0)
         expiry     = meta.get('expiry_date', date.today())
+        schwab_line = self._get_schwab_enrichment(symbol)
         await tg.send_block_print(
             direction=direction, strike=meta.get('strike', 0.0),
             expiry_date=expiry,
@@ -491,6 +543,7 @@ class TastyAlertSystem:
             ask_ratio=ask_ratio,
             underlying=meta.get('underlying', '/ES'),
             macro_context=self._get_macro(),
+            schwab_enrichment=schwab_line,
         )
         store.push(AlertRecord(
             alert_type="BLOCK_PRINT",
@@ -521,6 +574,7 @@ class TastyAlertSystem:
             iv=meta.get('iv', 0.0), vol_30s=vol_30s, ask_ratio=ask_ratio,
             underlying=meta.get('underlying', '/ES'),
             macro_context=self._get_macro(),
+            schwab_enrichment=self._get_schwab_enrichment(symbol),
         )
         store.push(AlertRecord(
             alert_type="BLOCK_ACCUM",
@@ -550,16 +604,18 @@ class TastyAlertSystem:
             bid = meta.get('last_trade_bid', meta.get('bid', 0.0))
             ask = meta.get('last_trade_ask', meta.get('ask', 0.0))
             last_price = meta.get('last_trade_price', (bid + ask) / 2.0 if (bid + ask) > 0 else 0.0)
+            schwab_line = self._get_schwab_enrichment(sym)
             contracts.append({
-                'strike':      meta.get('strike', 0),
-                'underlying':  meta.get('underlying', '/ES'),
-                'vol_1min':    vol_1min,
-                'ask_ratio':   ask_ratio,
-                'delta':       tracker_meta.get(sym, {}).get('delta', 0.0),
-                'bid':         bid,
-                'ask':         ask,
-                'last_price':  last_price,
-                'expiry_date': meta.get('expiry_date'),
+                'strike':            meta.get('strike', 0),
+                'underlying':        meta.get('underlying', '/ES'),
+                'vol_1min':          vol_1min,
+                'ask_ratio':         ask_ratio,
+                'delta':             tracker_meta.get(sym, {}).get('delta', 0.0),
+                'bid':               bid,
+                'ask':               ask,
+                'last_price':        last_price,
+                'expiry_date':       meta.get('expiry_date'),
+                'schwab_enrichment': schwab_line,
             })
             if expiry_date is None:
                 expiry_date = meta.get('expiry_date')
@@ -569,6 +625,7 @@ class TastyAlertSystem:
             expiry_date=expiry_date or date.today(),
             underlying=sweep_underlying,
             macro_context=self._get_macro(),
+            schwab_enrichment_lines=[c.get('schwab_enrichment', '') for c in contracts],
         )
         if contracts:
             top = contracts[0]
@@ -604,6 +661,7 @@ class TastyAlertSystem:
             tape=tape,
             underlying=meta.get('underlying', '/ES'),
             macro_context=self._get_macro(),
+            schwab_enrichment=self._get_schwab_enrichment(symbol),
         )
         store.push(AlertRecord(
             alert_type="PRESSURE_COOKER",
@@ -619,6 +677,65 @@ class TastyAlertSystem:
             ask=ask,
             macro_context=self._get_macro(),
             dte=(expiry - date.today()).days if expiry else 0,
+        ))
+
+    def _find_tt_symbol_for_strike(
+        self, strike: float, expiry, opt_type: str
+    ) -> str | None:
+        """Reverse lookup: find TT symbol matching a given strike/expiry/type."""
+        for sym, meta in self._contract_meta.items():
+            if (abs(float(meta.get('strike', 0)) - strike) < 0.5 and
+                meta.get('expiry_date') == expiry and
+                bool(meta.get('is_call')) == (opt_type == 'C')):
+                return sym
+        return None
+
+    async def _send_schwab_candidate(
+        self,
+        cand,
+        tt_sym: str,
+        tape: list,
+        ask_ratio: float,
+        vol_2min: int,
+        meta: dict,
+    ) -> None:
+        from schwab_stream import ContractCandidate
+        snap      = cand.snapshot
+        direction = 'CALL' if snap.opt_type == 'C' else 'PUT'
+        bid       = meta.get('bid', 0.0)
+        ask       = meta.get('ask', 0.0)
+        delta     = self.tracker.get_all_meta().get(tt_sym, {}).get('delta', 0.0)
+        iv        = meta.get('iv', 0.0)
+        await tg.send_schwab_candidate(
+            direction=direction,
+            strike=snap.strike,
+            expiry_date=snap.expiry,
+            underlying=meta.get('underlying', '/ES'),
+            schwab_vol=snap.day_volume,
+            schwab_velocity_1m=snap.velocity_1m,
+            schwab_velocity_5m=snap.velocity_5m,
+            vol_oi_ratio=snap.vol_oi_ratio,
+            schwab_reason=cand.reason,
+            tt_tape=tape,
+            tt_ask_ratio=ask_ratio,
+            tt_vol_2min=vol_2min,
+            bid=bid, ask=ask, delta=delta, iv=iv,
+            macro_context=self._get_macro(),
+        )
+        store.push(AlertRecord(
+            alert_type="SCHWAB_CANDIDATE",
+            direction=direction,
+            underlying=meta.get('underlying', '/ES'),
+            strike=snap.strike,
+            expiry_date=str(snap.expiry),
+            vol=snap.day_volume,
+            ask_ratio=ask_ratio,
+            delta=delta,
+            iv=iv,
+            bid=bid,
+            ask=ask,
+            macro_context=self._get_macro(),
+            dte=(snap.expiry - date.today()).days,
         ))
 
     # ─────────────────────────────────────────────────────────────

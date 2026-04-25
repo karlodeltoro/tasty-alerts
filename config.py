@@ -104,6 +104,10 @@ SCHWAB_CLIENT_SECRET = os.getenv("SCHWAB_CLIENT_SECRET", "")
 SCHWAB_TOKEN_JSON    = os.getenv("SCHWAB_TOKEN_JSON", "")
 SCHWAB_TOKEN_PATH    = os.getenv("SCHWAB_TOKEN_PATH", "")
 SCHWAB_ENABLED       = os.getenv("SCHWAB_ENABLED", "false").lower() == "true"
+SCHWAB_CONTRACT_MONITOR_ENABLED = os.getenv("SCHWAB_CONTRACT_MONITOR_ENABLED", "true").lower() == "true"
+SCHWAB_VELOCITY_1M_THRESHOLD    = float(os.getenv("SCHWAB_VELOCITY_1M_THRESHOLD", "40"))   # contracts/min to flag candidate
+SCHWAB_VELOCITY_ACCELERATION    = float(os.getenv("SCHWAB_VELOCITY_ACCELERATION", "2.0"))   # velocity_1m must be N× velocity_5m
+SCHWAB_VOL_OI_MIN_RATIO         = float(os.getenv("SCHWAB_VOL_OI_MIN_RATIO", "0.25"))       # min dayVol/OI ratio for surge detection
 
 # ── API server ────────────────────────────────────────────────
 API_ENABLED = os.getenv("API_ENABLED", "true").lower() == "true"

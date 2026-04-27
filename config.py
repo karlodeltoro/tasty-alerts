@@ -93,7 +93,8 @@ MIN_CONTRACT_PRICE_FLOOR = float(os.getenv("MIN_CONTRACT_PRICE_FLOOR", "2.0"))
 
 # ── Stream warmup / pending trades ───────────────────────────
 QUOTE_WARMUP_SECONDS          = float(os.getenv("QUOTE_WARMUP_SECONDS", "2.0"))
-PENDING_TRADE_MAX_AGE_SECONDS = float(os.getenv("PENDING_TRADE_MAX_AGE_SECONDS", "5.0"))
+PENDING_TRADE_MAX_AGE_SECONDS = float(os.getenv("PENDING_TRADE_MAX_AGE_SECONDS", "30.0"))
+LARGE_TRADE_BYPASS_SIZE       = int(os.getenv("LARGE_TRADE_BYPASS_SIZE", "200"))
 
 # ── Multi-expiry support ──────────────────────────────────────
 MULTI_EXPIRY_COUNT = int(os.getenv("MULTI_EXPIRY_COUNT", "2"))

@@ -301,7 +301,7 @@ class TastyAlertSystem:
         """Process a single validated trade through engines."""
         bid  = meta.get('bid', 0.0)
         ask  = meta.get('ask', 0.0)
-        mark = (bid + ask) / 2.0 if (bid + ask) > 0 else 0.0
+        mark = (bid + ask) / 2.0 if (bid + ask) > 0 else price
 
         # F14 — Delta-aware price filter
         delta = self.tracker.get_all_meta().get(sym, {}).get('delta', 0.0)
@@ -396,11 +396,19 @@ class TastyAlertSystem:
             bid  = meta.get('bid', 0.0)
             ask  = meta.get('ask', 0.0)
 
-            # No quote yet — queue instead of dropping
+            # No quote yet — bypass for large trades, queue small ones
             if bid == 0.0 and ask == 0.0:
-                self._discarded_no_quote += 1
-                logger.debug(f"[PENDING] queued trade {sym} size={size} — no quote yet")
-                self._enqueue_pending(sym, int(size), float(trade.price or 0.0), False)
+                if int(size) >= config.LARGE_TRADE_BYPASS_SIZE:
+                    logger.info(
+                        f"[LARGE_TRADE_BYPASS] {sym} size={size} — "
+                        f"no quote but bypassing pending queue (size >= {config.LARGE_TRADE_BYPASS_SIZE})"
+                    )
+                    trade_price = float(trade.price) if trade.price else 0.0
+                    self._process_trade(sym, int(size), trade_price, False, meta)
+                else:
+                    self._discarded_no_quote += 1
+                    logger.debug(f"[PENDING] queued trade {sym} size={size} — no quote yet")
+                    self._enqueue_pending(sym, int(size), float(trade.price or 0.0), False)
                 continue
 
             trade_price = float(trade.price) if trade.price else (bid + ask) / 2.0

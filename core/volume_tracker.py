@@ -12,10 +12,12 @@ import logging
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import config
 
 logger = logging.getLogger(__name__)
+_ET = ZoneInfo("America/New_York")
 
 
 @dataclass
@@ -65,7 +67,7 @@ class VolumeTracker:
         if size <= 0:
             return None
 
-        now = datetime.now()
+        now = datetime.now(_ET)
         event = (now, size, price)
         self._q1[symbol].append(event)
         self._q5[symbol].append(event)
@@ -109,7 +111,7 @@ class VolumeTracker:
         if symbol not in self._meta:
             return None
 
-        now = datetime.now()
+        now = datetime.now(_ET)
         prev = self._last_total.get(symbol)
         if prev is None:
             self._last_total[symbol] = total_volume
@@ -147,7 +149,7 @@ class VolumeTracker:
         )
 
     def get_vol_1min(self, symbol: str) -> int:
-        now = datetime.now()
+        now = datetime.now(_ET)
         cutoff = now - timedelta(seconds=60)
         q = self._q1.get(symbol)
         if not q:
@@ -157,7 +159,7 @@ class VolumeTracker:
 
     def get_vol_30s(self, symbol: str) -> int:
         """Total acumulado en los últimos 30 segundos."""
-        now = datetime.now()
+        now = datetime.now(_ET)
         cutoff = now - timedelta(seconds=30)
         q = self._q30.get(symbol)
         if not q:
@@ -167,7 +169,7 @@ class VolumeTracker:
 
     def get_ask_vol_1min(self, symbol: str) -> int:
         """Volumen de los últimos 60s ejecutado en el ask (price >= ask)."""
-        now = datetime.now()
+        now = datetime.now(_ET)
         cutoff = now - timedelta(seconds=60)
         q = self._q1_ask.get(symbol)
         if not q:
@@ -177,7 +179,7 @@ class VolumeTracker:
 
     def get_vol_2min_aggressive(self, symbol: str) -> int:
         """Volume in last 120s executed at or above ask."""
-        now = datetime.now()
+        now = datetime.now(_ET)
         cutoff = now - timedelta(seconds=120)
         q = self._q2_agg.get(symbol)
         if not q:
@@ -197,7 +199,7 @@ class VolumeTracker:
             raise ValueError(
                 "max window is 300s — use get_vol_30s() or get_vol_1min() for shorter windows"
             )
-        now = datetime.now()
+        now = datetime.now(_ET)
         cutoff = now - timedelta(seconds=seconds)
         q = self._q5.get(symbol)
         if not q:
@@ -207,7 +209,7 @@ class VolumeTracker:
 
     def get_tape(self, symbol: str, seconds: int) -> list[tuple]:
         """Retorna los trades individuales dentro de la ventana como (timestamp, size, price)."""
-        now = datetime.now()
+        now = datetime.now(_ET)
         cutoff = now - timedelta(seconds=seconds)
         q = self._q5.get(symbol)
         if not q:

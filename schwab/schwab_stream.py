@@ -42,7 +42,7 @@ class MacroContext:
     def format_for_alert(self) -> str:
         """Compact macro string for Telegram alerts. Returns empty-safe string."""
         if self.stream_type == "UNAVAILABLE":
-            return "Macro unavailable"
+            return ""
 
         parts = []
 
@@ -79,7 +79,7 @@ class MacroContext:
             parts.append(spy_str)
 
         if not parts:
-            return "Macro loading..."
+            return ""
 
         prefix = "[STALE] " if self.stream_type == "STALE" else ""
         return prefix + " | ".join(parts)

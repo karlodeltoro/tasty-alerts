@@ -24,10 +24,10 @@ import uvicorn
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 import config
-import telegram_notifier as tg
+import core.telegram_notifier as tg
 from api import app as fastapi_app
-from tasty_stream import TastyAlertSystem
-import renew_session
+from core.tasty_stream import TastyAlertSystem
+import auth.renew_session as renew_session
 
 logging.basicConfig(
     level=logging.INFO,

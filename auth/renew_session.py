@@ -20,7 +20,7 @@ import httpx
 from dotenv import load_dotenv
 from tastytrade.session import Session
 
-import telegram_notifier as tg
+import core.telegram_notifier as tg
 
 load_dotenv()
 logger = logging.getLogger(__name__)

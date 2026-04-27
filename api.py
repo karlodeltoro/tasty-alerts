@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security.api_key import APIKeyHeader, APIKeyQuery
 
 import config
-from alert_store import store
+from core.alert_store import store
 
 _ET = ZoneInfo("America/New_York")
 

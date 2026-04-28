@@ -303,13 +303,9 @@ class TastyAlertSystem:
         ask  = meta.get('ask', 0.0)
         mark = (bid + ask) / 2.0 if (bid + ask) > 0 else price
 
-        # F14 — Delta-aware price filter
-        delta = self.tracker.get_all_meta().get(sym, {}).get('delta', 0.0)
-        min_price = config.MIN_CONTRACT_PRICE * (1 - abs(delta))
-        min_price = max(min_price, config.MIN_CONTRACT_PRICE_FLOOR)
-        if mark < min_price:
+        if mark < config.MIN_CONTRACT_PRICE_FLOOR:
             self._discarded_price_filter += 1
-            logger.debug(f"[DROP:PRICE] {sym} mark={mark:.2f} < min={min_price:.2f}")
+            logger.debug(f"[DROP:PRICE] {sym} mark={mark:.2f} < floor={config.MIN_CONTRACT_PRICE_FLOOR:.2f}")
             return
 
         meta['last_trade_price'] = price

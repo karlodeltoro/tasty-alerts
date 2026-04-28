@@ -194,12 +194,14 @@ class BlockPrintEngine:
                 # 200+ contracts — fire regardless of execution price
                 pass
             elif trade_size >= config.BLOCK_PRINT_MEDIUM_MIN_VOL:
-                # 150-199 contracts — require price >= ask
+                # 150-199 contracts — require price >= ask (aggressive fill)
                 if exec_price < ask_price:
+                    logger.debug(f"[DROP:BLOCK] {symbol} size={trade_size} exec={exec_price:.2f} < ask={ask_price:.2f}")
                     return False
             elif trade_size >= config.BLOCK_PRINT_SMALL_MIN_VOL:
-                # 100-149 contracts — require price strictly above ask
-                if exec_price <= ask_price:
+                # 100-149 contracts — require price at or above ask (at-ask = institutional aggressor)
+                if exec_price < ask_price:
+                    logger.debug(f"[DROP:BLOCK] {symbol} size={trade_size} exec={exec_price:.2f} < ask={ask_price:.2f}")
                     return False
             else:
                 # Below 100 contracts during market hours — never fire

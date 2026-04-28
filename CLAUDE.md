@@ -144,11 +144,11 @@ Aplicados en `_handle_trades()` antes de pasar al engine:
 | Filtro | Variable | Default | Descripción |
 |--------|----------|---------|-------------|
 | Quote recibida | — | — | Si `bid=0` y `ask=0`, el trade se ignora (datos insuficientes) |
-| Precio mínimo de contrato | `MIN_CONTRACT_PRICE` | `$7.00` | Ignora contratos baratos; único gate de calidad |
+| Precio mínimo de contrato | `MIN_CONTRACT_PRICE_FLOOR` | `$2.00` | Filtra contratos de centavo; único gate de calidad |
 | Distancia máxima al strike | `MAX_STRIKE_DISTANCE_PCT` | `15%` | Solo carga strikes dentro del ±15% del precio del futuro |
 | Vol máximo por ciclo | `MAX_VOL_DELTA_PER_CYCLE` | `500` | Cap de seguridad contra spikes de data |
 
-**Nota:** El delta **no se usa como filtro de disparo** en ningún trigger. Se muestra en las alertas de Telegram como información, pero no condiciona si el trigger se activa. El precio del contrato (`mark >= $7`) es el único gate de calidad — un contrato a ese precio siempre tiene delta relevante.
+**Nota:** El delta **no se usa como filtro** en ningún punto. Se muestra en las alertas como información únicamente. El único gate de calidad es el precio del contrato (`mark >= MIN_CONTRACT_PRICE_FLOOR = $2`). Esto captura flujo institucional en opciones OTM baratas que antes se filtraban por error. Los thresholds de volumen de cada engine son el verdadero filtro de ruido.
 
 ---
 

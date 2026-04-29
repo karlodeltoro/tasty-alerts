@@ -77,6 +77,26 @@ class TastyAlertSystem:
     # Carga de cadena
     # ─────────────────────────────────────────────────────────────
 
+    # ─────────────────────────────────────────────────────────────
+    # Batched subscription helper
+    # ─────────────────────────────────────────────────────────────
+
+    @staticmethod
+    async def _subscribe_batched(
+        streamer: DXLinkStreamer,
+        event_class,
+        symbols: list[str],
+        batch_size: int = 400,
+    ) -> None:
+        """
+        Subscribe symbols in batches to avoid WebSocket 1009 (message too large).
+        A single FEED_SUBSCRIPTION message with 1500+ symbols can exceed the
+        DXLink server limit, causing a silent 1009 close with no reconnect.
+        """
+        for i in range(0, len(symbols), batch_size):
+            chunk = symbols[i:i + batch_size]
+            await streamer.subscribe(event_class, chunk)
+
     def _reset_counters(self) -> None:
         self._trade_count = 0
         self._quote_count = 0
@@ -1029,30 +1049,22 @@ class TastyAlertSystem:
                 await self._macro_stream.start()
                 logger.info("[SCHWAB] MacroContext stream started")
 
-            # F1+F2 — Subscription order: Quote first, warmup, then Greeks, Trade last
-            logger.info(f"Registrando suscripción Quote para {len(symbols)} símbolos...")
-            await streamer.subscribe(Quote, symbols)
+            # F1+F2 — Subscription order: Quote first, warmup, then Greeks, TimeAndSale last.
+            # All subscriptions are batched (≤400 symbols/message) to avoid WebSocket 1009.
+            logger.info(f"Registrando suscripción Quote para {len(symbols)} símbolos (batched)...")
+            await self._subscribe_batched(streamer, Quote, symbols)
             logger.info(f"  Quote OK.")
 
             logger.info(f"Esperando {config.QUOTE_WARMUP_SECONDS}s para warmup de quotes...")
             await asyncio.sleep(config.QUOTE_WARMUP_SECONDS)
 
-            logger.info(f"Registrando suscripción Greeks para {len(symbols)} símbolos...")
-            await streamer.subscribe(Greeks, symbols)
+            logger.info(f"Registrando suscripción Greeks para {len(symbols)} símbolos (batched)...")
+            await self._subscribe_batched(streamer, Greeks, symbols)
             logger.info(f"  Greeks OK.")
 
-            logger.info(f"Registrando suscripción TimeAndSale para {len(symbols)} símbolos...")
-            await streamer.subscribe(TimeAndSale, symbols)
+            logger.info(f"Registrando suscripción TimeAndSale para {len(symbols)} símbolos (batched)...")
+            await self._subscribe_batched(streamer, TimeAndSale, symbols)
             logger.info(f"  TimeAndSale OK. Muestra: {symbols[:3]}")
-
-            logger.info(f"Registrando suscripción Summary para {len(symbols)} símbolos...")
-            await streamer.subscribe(Summary, symbols)
-            logger.info(f"  Summary OK.")
-
-            if self._futures_symbols:
-                logger.info(f"Registrando suscripción Underlying para {self._futures_symbols}...")
-                await streamer.subscribe(Underlying, self._futures_symbols)
-                logger.info(f"  Underlying OK.")
 
             logger.info(f"=== Streaming activo — {len(symbols)} contratos suscritos. Esperando eventos... ===")
 
@@ -1060,8 +1072,6 @@ class TastyAlertSystem:
                 self._handle_time_and_sale(streamer),
                 self._handle_quotes(streamer),
                 self._handle_greeks(streamer),
-                self._handle_summary(streamer),
-                self._handle_underlying(streamer),
                 self._periodic_checks(),
                 self._stream_watchdog(),
             )
@@ -1090,16 +1100,12 @@ class TastyAlertSystem:
                 await tg.send_reload_message(0, self._current_expiry, underlying=", ".join(config.WATCH_SYMBOLS))
                 return
 
-            logger.info(f"Re-suscribiendo {len(new_symbols)} contratos en streamer principal...")
-            # same subscription order on reload
-            await self._streamer.subscribe(Quote, new_symbols)
+            logger.info(f"Re-suscribiendo {len(new_symbols)} contratos en streamer principal (batched)...")
+            await self._subscribe_batched(self._streamer, Quote, new_symbols)
             await asyncio.sleep(config.QUOTE_WARMUP_SECONDS)
-            await self._streamer.subscribe(Greeks, new_symbols)
-            await self._streamer.subscribe(TimeAndSale, new_symbols)
-            await self._streamer.subscribe(Summary, new_symbols)
-            if self._futures_symbols:
-                await self._streamer.subscribe(Underlying, self._futures_symbols)
-            logger.info(f"  Suscripciones TimeAndSale/Summary/Quote/Greeks registradas. Muestra: {new_symbols[:3]}")
+            await self._subscribe_batched(self._streamer, Greeks, new_symbols)
+            await self._subscribe_batched(self._streamer, TimeAndSale, new_symbols)
+            logger.info(f"  Suscripciones TimeAndSale/Quote/Greeks registradas. Muestra: {new_symbols[:3]}")
 
         finally:
             # F9 — always clear flag, then drain

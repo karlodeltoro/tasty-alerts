@@ -743,6 +743,43 @@ class TastyAlertSystem:
         ))
 
     # ─────────────────────────────────────────────────────────────
+    # Stream watchdog
+    # ─────────────────────────────────────────────────────────────
+
+    async def _stream_watchdog(self) -> None:
+        """Detect silent WebSocket freeze (+0 trades/min during market hours) and cancel run_session."""
+        last_seen_count = 0
+        frozen_since: datetime | None = None
+
+        while True:
+            await asyncio.sleep(config.WATCHDOG_CHECK_INTERVAL)
+
+            if not self._is_market_hours() or not self._active_symbols:
+                frozen_since = None
+                last_seen_count = self._trade_count
+                continue
+
+            if self._trade_count > last_seen_count:
+                last_seen_count = self._trade_count
+                frozen_since = None
+            else:
+                now = _now()
+                if frozen_since is None:
+                    frozen_since = now
+                elif (now - frozen_since).total_seconds() >= config.WATCHDOG_FREEZE_SECONDS:
+                    frozen_s = (now - frozen_since).total_seconds()
+                    logger.warning(
+                        f"[WATCHDOG] {frozen_s:.0f}s sin trades en horario de mercado "
+                        f"(contratos={len(self._active_symbols)}) — forzando reconexión"
+                    )
+                    frozen_since = None
+                    last_seen_count = 0
+                    for task in asyncio.all_tasks():
+                        if task.get_name() == "run_session":
+                            task.cancel()
+                            return
+
+    # ─────────────────────────────────────────────────────────────
     # Sesión principal
     # ─────────────────────────────────────────────────────────────
 
@@ -889,6 +926,7 @@ class TastyAlertSystem:
                 self._handle_quotes(streamer),
                 self._handle_greeks(streamer),
                 self._periodic_checks(),
+                self._stream_watchdog(),
             )
             self._streamer = None
 

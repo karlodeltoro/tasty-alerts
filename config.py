@@ -96,6 +96,10 @@ QUOTE_WARMUP_SECONDS          = float(os.getenv("QUOTE_WARMUP_SECONDS", "2.0"))
 PENDING_TRADE_MAX_AGE_SECONDS = float(os.getenv("PENDING_TRADE_MAX_AGE_SECONDS", "30.0"))
 LARGE_TRADE_BYPASS_SIZE       = int(os.getenv("LARGE_TRADE_BYPASS_SIZE", "200"))
 
+# ── Stream watchdog ───────────────────────────────────────────
+WATCHDOG_FREEZE_SECONDS = int(os.getenv("WATCHDOG_FREEZE_SECONDS", "180"))
+WATCHDOG_CHECK_INTERVAL = int(os.getenv("WATCHDOG_CHECK_INTERVAL", "60"))
+
 # ── Multi-expiry support ──────────────────────────────────────
 MULTI_EXPIRY_COUNT = int(os.getenv("MULTI_EXPIRY_COUNT", "2"))
 

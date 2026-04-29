@@ -29,6 +29,7 @@ class AlertRecord:
     macro_context: str    # e.g. "VIX 28.4 | TICK -800 | SPY 541.2"
     timestamp: str = field(default_factory=lambda: datetime.now(_ET).isoformat())
     dte: int = 0
+    open_interest: int = 0
 
 
 class AlertStore:

@@ -205,6 +205,7 @@ async def send_block_print(
     underlying: str = "/ES",
     macro_context: str = "",
     schwab_enrichment: str = "",
+    open_interest: int = 0,
 ) -> bool:
     """Envía alerta de Block Print a Telegram."""
     dte     = (expiry_date - date.today()).days
@@ -219,13 +220,14 @@ async def send_block_print(
     else:                   side = "MID"
 
     ask_line      = f"  |  {int(ask_ratio * 100)}% ask-side" if ask_ratio >= 0.6 else ""
+    oi_str        = f"  |  OI {open_interest:,}" if open_interest > 0 else ""
     schwab_line   = f"{schwab_enrichment}\n" if schwab_enrichment else ""
     macro_line    = f"{macro_context}\n" if macro_context else ""
 
     text = (
         f"*🖨️ BLOCK PRINT  {label}  {direction}  {underlying}  {vol_delta} vol*\n"
         f"\n"
-        f"{exp_str}  |  {dte} DTE  |  Δ {abs(delta):.2f}  |  IV {iv_pct}%\n"
+        f"{exp_str}  |  {dte} DTE  |  Δ {abs(delta):.2f}  |  IV {iv_pct}%{oi_str}\n"
         f"{_SEP}\n"
         f"Bid {bid:.2f}  |  Ask {ask:.2f}  |  Exec ${exec_price:.2f}\n"
         f"{_SEP}\n"
@@ -256,6 +258,7 @@ async def send_block_accum(
     underlying: str = "/ES",
     macro_context: str = "",
     schwab_enrichment: str = "",
+    open_interest: int = 0,
 ) -> bool:
     """Envía alerta de Block Accumulator a Telegram."""
     dte     = (expiry_date - date.today()).days
@@ -266,13 +269,14 @@ async def send_block_accum(
     now_hms = datetime.now(_ET).strftime("%H:%M:%S")
 
     ask_line    = f"  |  {int(ask_ratio * 100)}% ask-side" if ask_ratio >= 0.6 else ""
+    oi_str      = f"  |  OI {open_interest:,}" if open_interest > 0 else ""
     schwab_line = f"{schwab_enrichment}\n" if schwab_enrichment else ""
     macro_line  = f"{macro_context}\n" if macro_context else ""
 
     text = (
         f"*🏦 BLOCK ACCUM  {label}  {direction}  {underlying}  {vol_30s} vol / 30s*\n"
         f"\n"
-        f"{exp_str}  |  {dte} DTE  |  Δ {abs(delta):.2f}  |  IV {iv_pct}%\n"
+        f"{exp_str}  |  {dte} DTE  |  Δ {abs(delta):.2f}  |  IV {iv_pct}%{oi_str}\n"
         f"{_SEP}\n"
         f"Bid {bid:.2f}  |  Ask {ask:.2f}\n"
         f"{_SEP}\n"

@@ -1,0 +1,54 @@
+2026-04-09 16:04:33,151 [INFO] Autenticando como karlodeltoro52@gmail.com (username/password)...
+2026-04-09 16:04:33,713 [INFO] HTTP Request: POST https://api.tastyworks.com/sessions "HTTP/1.1 201 Created"
+2026-04-09 16:04:33,835 [INFO] HTTP Request: GET https://api.tastyworks.com/quote-streamer-tokens "HTTP/1.1 200 OK"
+2026-04-09 16:04:33,836 [INFO] Login exitoso.
+2026-04-09 16:04:33,838 [INFO] Sesión guardada en /Users/karlo.deltoro/Desktop/tasty-alerts/session.json
+2026-04-09 16:04:33,838 [WARNING] Railway vars no configuradas — saltando actualización.
+2026-04-09 16:04:33,838 [WARNING] Sesión renovada pero Railway NO actualizado. Expira: 2026-04-10 20:04:33.765000+00:00
+2026-04-09 16:04:35,452 [INFO] HTTP Request: POST https://api.telegram.org/bot8754315061:AAFpUK7ciYXx9V2nqhTA02LLoAmxYQ-1hSs/sendMessage "HTTP/1.1 200 OK"
+2026-04-09 16:04:36,042 [INFO] HTTP Request: POST https://api.telegram.org/bot8754315061:AAFpUK7ciYXx9V2nqhTA02LLoAmxYQ-1hSs/sendMessage "HTTP/1.1 200 OK"
+2026-04-09 23:10:25,361 [INFO] Autenticando como karlodeltoro52@gmail.com (username/password)...
+2026-04-09 23:10:25,785 [INFO] HTTP Request: POST https://api.tastyworks.com/sessions "HTTP/1.1 201 Created"
+2026-04-09 23:10:25,889 [INFO] HTTP Request: GET https://api.tastyworks.com/quote-streamer-tokens "HTTP/1.1 200 OK"
+2026-04-09 23:10:25,891 [INFO] Login exitoso.
+2026-04-09 23:10:25,894 [INFO] Sesión guardada en /Users/karlo.deltoro/Desktop/tasty-alerts/session.json
+2026-04-09 23:10:27,620 [INFO] HTTP Request: POST https://backboard.railway.app/graphql/v2 "HTTP/1.1 200 OK"
+2026-04-09 23:10:27,621 [INFO] TT_SESSION_JSON actualizado en Railway.
+2026-04-09 23:10:27,621 [INFO] Sesión renovada. Expira: 2026-04-11 03:10:25.849000+00:00. Railway: OK
+2026-04-09 23:10:28,206 [INFO] HTTP Request: POST https://api.telegram.org/bot8754315061:AAFpUK7ciYXx9V2nqhTA02LLoAmxYQ-1hSs/sendMessage "HTTP/1.1 200 OK"
+2026-04-10 06:11:35,655 [INFO] Autenticando como karlodeltoro52@gmail.com (username/password)...
+2026-04-10 06:11:36,061 [INFO] HTTP Request: POST https://api.tastyworks.com/sessions "HTTP/1.1 201 Created"
+2026-04-10 06:11:36,171 [INFO] HTTP Request: GET https://api.tastyworks.com/quote-streamer-tokens "HTTP/1.1 200 OK"
+2026-04-10 06:11:36,172 [INFO] Login exitoso.
+2026-04-10 06:11:36,177 [INFO] Sesión guardada en /Users/karlo.deltoro/Desktop/tasty-alerts/session.json
+2026-04-10 06:11:38,215 [INFO] HTTP Request: POST https://backboard.railway.app/graphql/v2 "HTTP/1.1 200 OK"
+2026-04-10 06:11:38,216 [INFO] TT_SESSION_JSON actualizado en Railway.
+2026-04-10 06:11:38,216 [INFO] Sesión renovada. Expira: 2026-04-11 10:11:36.065000+00:00. Railway: OK
+2026-04-10 06:11:38,816 [INFO] HTTP Request: POST https://api.telegram.org/bot8754315061:AAFpUK7ciYXx9V2nqhTA02LLoAmxYQ-1hSs/sendMessage "HTTP/1.1 200 OK"
+2026-04-10 12:33:54,791 [INFO] Autenticando como karlodeltoro52@gmail.com (username/password)...
+2026-04-10 12:33:55,137 [INFO] HTTP Request: POST https://api.tastyworks.com/sessions "HTTP/1.1 201 Created"
+2026-04-10 12:33:55,236 [INFO] HTTP Request: GET https://api.tastyworks.com/quote-streamer-tokens "HTTP/1.1 200 OK"
+2026-04-10 12:33:55,237 [INFO] Login exitoso.
+2026-04-10 12:33:55,241 [INFO] Sesión guardada en /Users/karlo.deltoro/Desktop/tasty-alerts/session.json
+2026-04-10 12:33:57,420 [INFO] HTTP Request: POST https://backboard.railway.app/graphql/v2 "HTTP/1.1 200 OK"
+2026-04-10 12:33:57,421 [INFO] TT_SESSION_JSON actualizado en Railway.
+2026-04-10 12:33:57,421 [INFO] Sesión renovada. Expira: 2026-04-11 16:33:55.163000+00:00. Railway: OK
+2026-04-10 12:33:58,011 [INFO] HTTP Request: POST https://api.telegram.org/bot8754315061:AAFpUK7ciYXx9V2nqhTA02LLoAmxYQ-1hSs/sendMessage "HTTP/1.1 200 OK"
+2026-04-10 18:49:20,366 [INFO] Autenticando como karlodeltoro52@gmail.com (username/password)...
+2026-04-10 18:49:20,720 [INFO] HTTP Request: POST https://api.tastyworks.com/sessions "HTTP/1.1 201 Created"
+2026-04-10 18:49:20,830 [INFO] HTTP Request: GET https://api.tastyworks.com/quote-streamer-tokens "HTTP/1.1 200 OK"
+2026-04-10 18:49:20,832 [INFO] Login exitoso.
+2026-04-10 18:49:20,835 [INFO] Sesión guardada en /Users/karlo.deltoro/Desktop/tasty-alerts/session.json
+2026-04-10 18:49:23,662 [INFO] HTTP Request: POST https://backboard.railway.app/graphql/v2 "HTTP/1.1 200 OK"
+2026-04-10 18:49:23,662 [INFO] TT_SESSION_JSON actualizado en Railway.
+2026-04-10 18:49:23,662 [INFO] Sesión renovada. Expira: 2026-04-11 22:49:20.768000+00:00. Railway: OK
+2026-04-10 18:49:24,263 [INFO] HTTP Request: POST https://api.telegram.org/bot8754315061:AAFpUK7ciYXx9V2nqhTA02LLoAmxYQ-1hSs/sendMessage "HTTP/1.1 200 OK"
+2026-04-11 14:48:15,774 [INFO] Autenticando como karlodeltoro52@gmail.com (username/password)...
+2026-04-11 14:48:16,354 [INFO] HTTP Request: POST https://api.tastyworks.com/sessions "HTTP/1.1 201 Created"
+2026-04-11 14:48:16,451 [INFO] HTTP Request: GET https://api.tastyworks.com/quote-streamer-tokens "HTTP/1.1 200 OK"
+2026-04-11 14:48:16,452 [INFO] Login exitoso.
+2026-04-11 14:48:16,454 [INFO] Sesión guardada en /Users/karlo.deltoro/Desktop/tasty-alerts/session.json
+2026-04-11 14:48:19,349 [INFO] HTTP Request: POST https://backboard.railway.app/graphql/v2 "HTTP/1.1 200 OK"
+2026-04-11 14:48:19,350 [INFO] TT_SESSION_JSON actualizado en Railway.
+2026-04-11 14:48:19,350 [INFO] Sesión renovada. Expira: 2026-04-12 18:48:16.386000+00:00. Railway: OK
+2026-04-11 14:48:19,967 [INFO] HTTP Request: POST https://api.telegram.org/bot8754315061:AAFpUK7ciYXx9V2nqhTA02LLoAmxYQ-1hSs/sendMessage "HTTP/1.1 200 OK"

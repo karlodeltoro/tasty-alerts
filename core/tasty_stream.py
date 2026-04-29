@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 import os
 
 from tastytrade import DXLinkStreamer
-from tastytrade.dxfeed import Greeks, Quote, Trade
+from tastytrade.dxfeed import Greeks, Quote, Summary, TimeAndSale, Trade, Underlying
 from tastytrade.instruments import Future, NestedFutureOptionChain
 from tastytrade.session import Session
 
@@ -67,6 +67,11 @@ class TastyAlertSystem:
         self._discarded_price_filter: int = 0
         self._discarded_unknown_sym: int = 0
         self._discarded_zero_size: int = 0
+        # ── OI snapshot (Summary events) ─────────────────────────
+        self._oi_snapshot: dict[str, int] = {}
+        # ── Underlying data (PCR, call/put vol) ──────────────────
+        self._underlying_data: dict[str, dict] = {}
+        self._futures_symbols: list[str] = []
 
     # ─────────────────────────────────────────────────────────────
     # Carga de cadena
@@ -100,6 +105,8 @@ class TastyAlertSystem:
         self.pc_engine.reset()
         self._contract_meta.clear()
         self._pending_trades.clear()
+        self._oi_snapshot.clear()
+        self._futures_symbols = []
         self._reset_counters()
         all_symbols: list[str] = []
 
@@ -239,7 +246,10 @@ class TastyAlertSystem:
                 logger.info(f"  Muestra de símbolos: {sample}")
 
         self._active_symbols = all_symbols
-        logger.info(f"=== load_chain() completado: {len(all_symbols)} contratos totales ===")
+        self._futures_symbols = list(dict.fromkeys(
+            m['futures_sym'] for m in self._contract_meta.values() if m.get('futures_sym')
+        ))
+        logger.info(f"=== load_chain() completado: {len(all_symbols)} contratos totales | futuros: {self._futures_symbols} ===")
 
         # Subscribe option contracts to Schwab monitor
         if self._macro_stream is not None and all_symbols:
@@ -360,7 +370,8 @@ class TastyAlertSystem:
     # Handlers de eventos WebSocket
     # ─────────────────────────────────────────────────────────────
 
-    async def _handle_trades(self, streamer: DXLinkStreamer) -> None:
+    # Legacy Trade handler — replaced by TimeAndSale
+    async def _handle_trades_legacy(self, streamer: DXLinkStreamer) -> None:
         async for trade in streamer.listen(Trade):
             self._trade_count += 1
 
@@ -411,6 +422,73 @@ class TastyAlertSystem:
             is_ask = ask > 0 and trade_price >= ask
             self._process_trade(sym, int(size), trade_price, is_ask, meta)
 
+    async def _handle_time_and_sale(self, streamer: DXLinkStreamer) -> None:
+        async for event in streamer.listen(TimeAndSale):
+            self._trade_count += 1
+
+            # Drain pending queue first
+            self._drain_pending()
+
+            # Skip corrections, cancellations, and spread legs
+            if not event.valid_tick:
+                continue
+            if event.spread_leg:
+                continue
+
+            sym = event.event_symbol
+            if not self._first_trade_logged:
+                self._first_trade_logged = True
+                logger.info(
+                    f"[DIAGNÓSTICO] Primer TimeAndSale: sym={sym}, size={event.size}, "
+                    f"price={event.price}, aggressor={event.aggressor_side}"
+                )
+
+            if sym not in self._contract_meta:
+                self._discarded_unknown_sym += 1
+                logger.debug(f"[DROP:UNKNOWN] {sym}")
+                continue
+
+            size = event.size
+            if not size or size <= 0:
+                self._discarded_zero_size += 1
+                logger.debug(f"[DROP:ZERO_SIZE] {sym}")
+                continue
+
+            # aggressor_side='BUY' means buyer hit the ask
+            is_ask = event.aggressor_side == 'BUY'
+            trade_price = float(event.price or 0.0)
+
+            if self._reloading:
+                self._enqueue_pending(sym, int(size), trade_price, is_ask)
+                continue
+
+            meta = self._contract_meta[sym]
+
+            # Use T&S bid/ask (exact NBBO at fill time) when available
+            event_bid = float(event.bid_price or 0.0)
+            event_ask = float(event.ask_price or 0.0)
+            if event_bid > 0.0 or event_ask > 0.0:
+                meta['bid'] = event_bid
+                meta['ask'] = event_ask
+                self._process_trade(sym, int(size), trade_price, is_ask, meta)
+            else:
+                # No bid/ask in T&S event — fall back to quote cache
+                bid = meta.get('bid', 0.0)
+                ask = meta.get('ask', 0.0)
+                if bid == 0.0 and ask == 0.0:
+                    if int(size) >= config.LARGE_TRADE_BYPASS_SIZE:
+                        logger.info(
+                            f"[LARGE_TRADE_BYPASS] {sym} size={size} — "
+                            f"no T&S bid/ask, bypassing queue"
+                        )
+                        self._process_trade(sym, int(size), trade_price, is_ask, meta)
+                    else:
+                        self._discarded_no_quote += 1
+                        logger.debug(f"[PENDING] queued T&S {sym} size={size} — no bid/ask")
+                        self._enqueue_pending(sym, int(size), trade_price, is_ask)
+                else:
+                    self._process_trade(sym, int(size), trade_price, is_ask, meta)
+
     async def _handle_quotes(self, streamer: DXLinkStreamer) -> None:
         async for quote in streamer.listen(Quote):
             self._quote_count += 1
@@ -432,6 +510,34 @@ class TastyAlertSystem:
             if sym in self._contract_meta:
                 self.tracker.update_delta(sym, float(greeks.delta or 0.0))
                 self._contract_meta[sym]['iv'] = float(greeks.volatility or 0.0)
+
+    async def _handle_summary(self, streamer: DXLinkStreamer) -> None:
+        async for event in streamer.listen(Summary):
+            sym = event.event_symbol
+            if sym not in self._contract_meta:
+                continue
+            oi = getattr(event, 'open_interest', None)
+            if oi is not None:
+                try:
+                    oi_int = int(oi)
+                    if oi_int > 0:
+                        self._oi_snapshot[sym] = oi_int
+                except (TypeError, ValueError):
+                    pass
+
+    async def _handle_underlying(self, streamer: DXLinkStreamer) -> None:
+        if not self._futures_symbols:
+            return
+        async for event in streamer.listen(Underlying):
+            sym = event.event_symbol
+            try:
+                self._underlying_data[sym] = {
+                    'call_volume':   getattr(event, 'call_volume', None),
+                    'put_volume':    getattr(event, 'put_volume', None),
+                    'put_call_ratio': getattr(event, 'put_call_ratio', None),
+                }
+            except Exception:
+                pass
 
     async def _periodic_checks(self) -> None:
         _heartbeat_tick = 0
@@ -504,10 +610,20 @@ class TastyAlertSystem:
 
     def _get_macro(self) -> str:
         """Returns macro context string for alert enrichment, or empty string."""
-        if self._macro_stream is None:
-            return ""
-        ctx = self._macro_stream.get_context()
-        return ctx.format_for_alert()
+        parts = []
+        if self._macro_stream is not None:
+            ctx = self._macro_stream.get_context()
+            schwab_line = ctx.format_for_alert()
+            if schwab_line:
+                parts.append(schwab_line)
+        for sym, data in self._underlying_data.items():
+            pcr = data.get('put_call_ratio')
+            if pcr is not None:
+                try:
+                    parts.append(f"PCR {sym}: {float(pcr):.2f}")
+                except (TypeError, ValueError):
+                    pass
+        return "  |  ".join(parts)
 
     def _get_schwab_enrichment(self, symbol: str) -> str:
         """Get Schwab volume enrichment for a specific TT contract symbol."""
@@ -530,15 +646,16 @@ class TastyAlertSystem:
         await tg.send_raw_alert(direction, strike, expiry, vol_1min, mark, underlying=underlying)
 
     async def _send_block_print(self, symbol: str, vol_delta: int, ask_ratio: float = 0.0) -> None:
-        meta       = self._contract_meta.get(symbol, {})
-        direction  = 'CALL' if meta.get('is_call') else 'PUT'
-        bid        = meta.get('last_trade_bid', meta.get('bid', 0.0))
-        ask        = meta.get('last_trade_ask', meta.get('ask', 0.0))
-        mark       = (bid + ask) / 2.0 if (bid + ask) > 0 else 0.0
-        exec_price = meta.get('last_trade_price', mark)
-        delta      = self.tracker.get_all_meta().get(symbol, {}).get('delta', 0.0)
-        expiry     = meta.get('expiry_date', date.today())
+        meta        = self._contract_meta.get(symbol, {})
+        direction   = 'CALL' if meta.get('is_call') else 'PUT'
+        bid         = meta.get('last_trade_bid', meta.get('bid', 0.0))
+        ask         = meta.get('last_trade_ask', meta.get('ask', 0.0))
+        mark        = (bid + ask) / 2.0 if (bid + ask) > 0 else 0.0
+        exec_price  = meta.get('last_trade_price', mark)
+        delta       = self.tracker.get_all_meta().get(symbol, {}).get('delta', 0.0)
+        expiry      = meta.get('expiry_date', date.today())
         schwab_line = self._get_schwab_enrichment(symbol)
+        oi          = self._oi_snapshot.get(symbol, 0)
         await tg.send_block_print(
             direction=direction, strike=meta.get('strike', 0.0),
             expiry_date=expiry,
@@ -548,6 +665,7 @@ class TastyAlertSystem:
             underlying=meta.get('underlying', '/ES'),
             macro_context=self._get_macro(),
             schwab_enrichment=schwab_line,
+            open_interest=oi,
         )
         store.push(AlertRecord(
             alert_type="BLOCK_PRINT",
@@ -563,6 +681,7 @@ class TastyAlertSystem:
             ask=ask,
             macro_context=self._get_macro(),
             dte=(expiry - date.today()).days if expiry else 0,
+            open_interest=oi,
         ))
 
     async def _send_block_accum(self, symbol: str, vol_30s: int, ask_ratio: float) -> None:
@@ -571,6 +690,7 @@ class TastyAlertSystem:
         bid, ask  = meta.get('bid', 0.0), meta.get('ask', 0.0)
         delta     = self.tracker.get_all_meta().get(symbol, {}).get('delta', 0.0)
         expiry    = meta.get('expiry_date', date.today())
+        oi        = self._oi_snapshot.get(symbol, 0)
         await tg.send_block_accum(
             direction=direction, strike=meta.get('strike', 0.0),
             expiry_date=expiry,
@@ -579,6 +699,7 @@ class TastyAlertSystem:
             underlying=meta.get('underlying', '/ES'),
             macro_context=self._get_macro(),
             schwab_enrichment=self._get_schwab_enrichment(symbol),
+            open_interest=oi,
         )
         store.push(AlertRecord(
             alert_type="BLOCK_ACCUM",
@@ -594,6 +715,7 @@ class TastyAlertSystem:
             ask=ask,
             macro_context=self._get_macro(),
             dte=(expiry - date.today()).days if expiry else 0,
+            open_interest=oi,
         ))
 
     async def _send_sweep_burst(self, direction: str, group: list[tuple]) -> None:
@@ -915,16 +1037,27 @@ class TastyAlertSystem:
             await streamer.subscribe(Greeks, symbols)
             logger.info(f"  Greeks OK.")
 
-            logger.info(f"Registrando suscripción Trade para {len(symbols)} símbolos...")
-            await streamer.subscribe(Trade, symbols)
-            logger.info(f"  Trade OK. Muestra: {symbols[:3]}")
+            logger.info(f"Registrando suscripción TimeAndSale para {len(symbols)} símbolos...")
+            await streamer.subscribe(TimeAndSale, symbols)
+            logger.info(f"  TimeAndSale OK. Muestra: {symbols[:3]}")
+
+            logger.info(f"Registrando suscripción Summary para {len(symbols)} símbolos...")
+            await streamer.subscribe(Summary, symbols)
+            logger.info(f"  Summary OK.")
+
+            if self._futures_symbols:
+                logger.info(f"Registrando suscripción Underlying para {self._futures_symbols}...")
+                await streamer.subscribe(Underlying, self._futures_symbols)
+                logger.info(f"  Underlying OK.")
 
             logger.info(f"=== Streaming activo — {len(symbols)} contratos suscritos. Esperando eventos... ===")
 
             await asyncio.gather(
-                self._handle_trades(streamer),
+                self._handle_time_and_sale(streamer),
                 self._handle_quotes(streamer),
                 self._handle_greeks(streamer),
+                self._handle_summary(streamer),
+                self._handle_underlying(streamer),
                 self._periodic_checks(),
                 self._stream_watchdog(),
             )
@@ -954,12 +1087,15 @@ class TastyAlertSystem:
                 return
 
             logger.info(f"Re-suscribiendo {len(new_symbols)} contratos en streamer principal...")
-            # F1+F2 — same subscription order on reload
-            await self._streamer.subscribe(Quote,  new_symbols)
+            # same subscription order on reload
+            await self._streamer.subscribe(Quote, new_symbols)
             await asyncio.sleep(config.QUOTE_WARMUP_SECONDS)
             await self._streamer.subscribe(Greeks, new_symbols)
-            await self._streamer.subscribe(Trade,  new_symbols)
-            logger.info(f"  Suscripciones Trade/Quote/Greeks registradas. Muestra: {new_symbols[:3]}")
+            await self._streamer.subscribe(TimeAndSale, new_symbols)
+            await self._streamer.subscribe(Summary, new_symbols)
+            if self._futures_symbols:
+                await self._streamer.subscribe(Underlying, self._futures_symbols)
+            logger.info(f"  Suscripciones TimeAndSale/Summary/Quote/Greeks registradas. Muestra: {new_symbols[:3]}")
 
         finally:
             # F9 — always clear flag, then drain

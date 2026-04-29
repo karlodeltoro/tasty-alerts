@@ -20,6 +20,36 @@ from zoneinfo import ZoneInfo
 logger = logging.getLogger(__name__)
 _ET = ZoneInfo("America/New_York")
 
+_SCHWAB_PKG = None
+
+def _import_schwab_pkg():
+    """Load installed schwab-py from site-packages, bypassing local schwab/ package."""
+    global _SCHWAB_PKG
+    if _SCHWAB_PKG is not None:
+        return _SCHWAB_PKG
+    import sys, os
+    sp = next(
+        (p for p in sys.path if 'site-packages' in p
+         and os.path.isfile(os.path.join(p, 'schwab', 'auth.py'))),
+        None,
+    )
+    if sp is None:
+        raise ImportError("schwab-py not found in site-packages")
+    # Evict local schwab/* cache so the installed package can be loaded cleanly
+    local = {k: sys.modules.pop(k) for k in list(sys.modules)
+             if k == 'schwab' or k.startswith('schwab.')}
+    sys.path.insert(0, sp)
+    try:
+        import schwab as _pkg
+    finally:
+        sys.path.pop(0)
+        # Restore local submodules (schwab_stream, symbol_mapper) but keep installed 'schwab'
+        for k, v in local.items():
+            if k != 'schwab' and k not in sys.modules:
+                sys.modules[k] = v
+    _SCHWAB_PKG = _pkg
+    return _pkg
+
 
 @dataclass
 class MacroContext:
@@ -222,7 +252,7 @@ class SchwabMacroStream:
 
     async def _connect_and_stream(self) -> None:
         """Build client, subscribe, and stream until disconnect."""
-        import schwab
+        schwab = _import_schwab_pkg()
 
         token_path = _resolve_token_path()
         client = schwab.auth.client_from_token_file(
@@ -319,7 +349,7 @@ class SchwabMacroStream:
         self, stream_client, symbols: list[str]
     ) -> None:
         """Subscribe option symbols in batches of 500."""
-        import schwab as _schwab
+        _schwab = _import_schwab_pkg()
         CMD = _schwab.streaming.StreamClient.Command
         fields = _get_option_fields(_schwab)
         for i in range(0, len(symbols), 500):

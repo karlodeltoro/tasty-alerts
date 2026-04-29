@@ -703,7 +703,7 @@ class TastyAlertSystem:
         vol_2min: int,
         meta: dict,
     ) -> None:
-        from schwab_stream import ContractCandidate
+        from schwab.schwab_stream import ContractCandidate
         snap      = cand.snapshot
         direction = 'CALL' if snap.opt_type == 'C' else 'PUT'
         bid       = meta.get('bid', 0.0)

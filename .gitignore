@@ -1,8 +1,10 @@
 .env
 scripts/.env
 session.json
-alerts.log
-venv/
-__pycache__/
+schwab_token.json
+*.log
 *.pyc
+__pycache__/
+venv/
 token.json
+.DS_Store

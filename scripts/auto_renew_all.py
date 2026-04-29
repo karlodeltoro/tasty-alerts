@@ -3,12 +3,13 @@ auto_renew_all.py — Universal Tastytrade session renewal for all Railway servi
 
 Authenticates ONCE on Mac (authorized device — no OTP) and pushes the renewed
 session to every Railway service that depends on Tastytrade, in parallel.
-Also pushes the local Schwab token to Railway on every run.
+Also pushes both Schwab tokens to their respective Railway services on every run.
 
 Services updated:
   1. tasty-alerts       → TT_SESSION_JSON          (full serialized JSON, base64)
   2. bullcore-v2-agent  → TASTYTRADE_SESSION_TOKEN  (raw session token string)
-  3. tasty-alerts       → SCHWAB_TOKEN_JSON         (contents of schwab_token.json)
+  3. tasty-alerts       → SCHWAB_TOKEN_JSON         (~/Desktop/tasty-alerts/schwab_token.json)
+  4. bullcore-v2-agent  → SCHWAB_TOKEN_JSON         (~/Projects/bullcore-v2/agent/schwab_token.json)
 
 Runs as macOS LaunchAgent every 6 hours via:
   ~/Library/LaunchAgents/com.bullcore.tastyalerts.autorenew.plist
@@ -121,29 +122,31 @@ def _update_railway(svc: dict) -> tuple[str, bool, str]:
 
 # ── Schwab token push ────────────────────────────────────────────────────────
 
-def _push_schwab_token() -> tuple[str, bool, str]:
+def _push_schwab_token(
+    label: str,
+    token_file: Path,
+    project_id: str,
+    service_id: str,
+    environment_id: str,
+) -> tuple[str, bool, str]:
     """
-    Read schwab_token.json from the project root and push its contents to
-    the tasty-alerts Railway service as SCHWAB_TOKEN_JSON.
-    Returns (label, ok, error_msg) matching the _update_railway() contract.
+    Read token_file and push its contents to the given Railway service as
+    SCHWAB_TOKEN_JSON. Returns (label, ok, error_msg).
+    Skips silently if the file doesn't exist.
     """
-    label = "schwab-token"
-    token_file = _SCRIPT_DIR.parent / "schwab_token.json"
     if not token_file.exists():
-        logger.warning(f"schwab_token.json not found at {token_file} — skipping Schwab push")
-        return label, False, "schwab_token.json not found"
-
+        logger.warning(f"[{label}] {token_file} not found — skipping Schwab push")
+        return label, False, "file not found"
     try:
         token_json = token_file.read_text(encoding="utf-8")
     except Exception as e:
         return label, False, f"read error: {e}"
-
     svc = {
         "label":          label,
         "api_token":      os.getenv("RAILWAY_API_TOKEN", ""),
-        "project_id":     os.getenv("RAILWAY_PROJECT_ID", ""),
-        "service_id":     os.getenv("RAILWAY_SERVICE_ID", ""),
-        "environment_id": os.getenv("RAILWAY_ENVIRONMENT_ID", ""),
+        "project_id":     project_id,
+        "service_id":     service_id,
+        "environment_id": environment_id,
         "var_name":       "SCHWAB_TOKEN_JSON",
         "value":          token_json,
     }
@@ -203,11 +206,32 @@ def run() -> bool:
     # ── 2. Build service list ─────────────────────────────────────────────────
     services = _services(serialized, session)
 
-    # ── 3. Update all Railway services in parallel (TT + Schwab) ────────────
+    # ── 3. Update all Railway services in parallel (TT + both Schwab) ────────
+    api_token = os.getenv("RAILWAY_API_TOKEN", "")
+
+    # Schwab push descriptors: (label, token_file, project_id, service_id, env_id)
+    schwab_tasks = [
+        (
+            "schwab-tasty-alerts",
+            _SCRIPT_DIR.parent / "schwab_token.json",
+            os.getenv("RAILWAY_PROJECT_ID", ""),
+            "893eb6e2-482c-4969-a296-a19b5153fdb7",
+            os.getenv("RAILWAY_ENVIRONMENT_ID", ""),
+        ),
+        (
+            "schwab-bullcore-v2",
+            Path("/Users/karlo.deltoro/Projects/bullcore-v2/agent/schwab_token.json"),
+            "ce24718a-b0ca-4b6a-b73c-cb51c18b784f",
+            "2c09ef68-89b9-4359-9f07-ef184143bf26",
+            "90f56269-2b9a-4ad9-963e-a527da35bc31",
+        ),
+    ]
+
     results: dict[str, tuple[bool, str]] = {}  # label → (ok, error)
-    with ThreadPoolExecutor(max_workers=len(services) + 1) as pool:
+    with ThreadPoolExecutor(max_workers=len(services) + len(schwab_tasks)) as pool:
         futures: dict = {pool.submit(_update_railway, svc): svc["label"] for svc in services}
-        futures[pool.submit(_push_schwab_token)] = "schwab-token"
+        for args in schwab_tasks:
+            futures[pool.submit(_push_schwab_token, *args)] = args[0]
         for future in as_completed(futures):
             label, ok, err = future.result()
             results[label] = (ok, err)
@@ -227,12 +251,13 @@ def run() -> bool:
             lines.append(f"   Error: {err}")
             all_ok = False
 
-    # Schwab token result
-    schwab_ok, schwab_err = results.get("schwab-token", (False, "no result"))
-    schwab_icon = "✅" if schwab_ok else "❌"
-    lines.append(f"{schwab_icon} `schwab-token` → `SCHWAB_TOKEN_JSON`")
-    if not schwab_ok:
-        lines.append(f"   Error: {schwab_err}")
+    # Schwab token results
+    for label, _, _, _, _ in schwab_tasks:
+        ok, err = results.get(label, (False, "no result"))
+        icon = "✅" if ok else "❌"
+        lines.append(f"{icon} `{label}` → `SCHWAB_TOKEN_JSON`")
+        if not ok:
+            lines.append(f"   Error: {err}")
 
     _tg("\n".join(lines))
 

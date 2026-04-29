@@ -114,6 +114,9 @@ SCHWAB_VELOCITY_1M_THRESHOLD    = float(os.getenv("SCHWAB_VELOCITY_1M_THRESHOLD"
 SCHWAB_VELOCITY_ACCELERATION    = float(os.getenv("SCHWAB_VELOCITY_ACCELERATION", "2.0"))   # velocity_1m must be N× velocity_5m
 SCHWAB_VOL_OI_MIN_RATIO         = float(os.getenv("SCHWAB_VOL_OI_MIN_RATIO", "0.25"))       # min dayVol/OI ratio for surge detection
 
+# ── Session renewal ──────────────────────────────────────────
+RAILWAY_RENEW_ENABLED = os.getenv("RAILWAY_RENEW_ENABLED", "false").lower() == "true"
+
 # ── API server ────────────────────────────────────────────────
 API_ENABLED = os.getenv("API_ENABLED", "true").lower() == "true"
 API_PORT    = int(os.getenv("PORT", os.getenv("API_PORT", "8000")))

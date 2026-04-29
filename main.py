@@ -140,19 +140,21 @@ async def main() -> None:
         id="verify_stream",
     )
 
-    # Renovación de sesión: corre siempre (necesaria aunque el stream esté pausado)
-    scheduler.add_job(
-        renew_session.renew,
-        trigger="interval",
-        hours=8,
-        id="renew_session",
-    )
-    scheduler.add_job(
-        _expiry_watchdog,
-        trigger="interval",
-        hours=1,
-        id="expiry_watchdog",
-    )
+    # Renovación de sesión: solo si Railway está autorizado (default: false).
+    # La renovación la maneja el LaunchAgent de Mac (scripts/auto_renew.py).
+    if config.RAILWAY_RENEW_ENABLED:
+        scheduler.add_job(
+            renew_session.renew,
+            trigger="interval",
+            hours=8,
+            id="renew_session",
+        )
+        scheduler.add_job(
+            _expiry_watchdog,
+            trigger="interval",
+            hours=1,
+            id="expiry_watchdog",
+        )
 
     # Cierre y apertura de fin de semana
     scheduler.add_job(

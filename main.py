@@ -259,7 +259,7 @@ async def main() -> None:
                     "`python login.py` desde Mac\n"
                     "Luego actualizar TT_SESSION_JSON en Railway."
                 )
-                tg.send_private_message(_msg)
+                await tg.send_private_message(_msg)
                 if _device_challenge_retries >= 1:
                     logger.error("device_challenge_required: segundo intento fallido — deteniendo sistema.")
                     break

@@ -293,7 +293,9 @@ class SchwabMacroStream:
                 last_updated=datetime.now(_ET),
             )
 
-        await stream_client.handle_message()  # blocks until disconnect
+        # handle_message() processes one message per call — must loop until disconnect
+        while True:
+            await stream_client.handle_message()
         self._active_client = None
 
     def _handle_quote(self, msg: dict) -> None:

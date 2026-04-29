@@ -199,9 +199,9 @@ class BlockPrintEngine:
                     logger.debug(f"[DROP:BLOCK] {symbol} size={trade_size} exec={exec_price:.2f} < ask={ask_price:.2f}")
                     return False
             elif trade_size >= config.BLOCK_PRINT_SMALL_MIN_VOL:
-                # 100-149 contracts — require price at or above ask (at-ask = institutional aggressor)
-                if exec_price < ask_price:
-                    logger.debug(f"[DROP:BLOCK] {symbol} size={trade_size} exec={exec_price:.2f} < ask={ask_price:.2f}")
+                # 100-149 contracts — require price strictly above ask
+                if exec_price <= ask_price:
+                    logger.debug(f"[DROP:BLOCK] {symbol} size={trade_size} exec={exec_price:.2f} <= ask={ask_price:.2f}")
                     return False
             else:
                 # Below 100 contracts during market hours — never fire

@@ -656,6 +656,7 @@ class TastyAlertSystem:
         expiry      = meta.get('expiry_date', date.today())
         schwab_line = self._get_schwab_enrichment(symbol)
         oi          = self._oi_snapshot.get(symbol, 0)
+        macro       = self._get_macro()
         await tg.send_block_print(
             direction=direction, strike=meta.get('strike', 0.0),
             expiry_date=expiry,
@@ -663,7 +664,7 @@ class TastyAlertSystem:
             iv=meta.get('iv', 0.0), vol_delta=vol_delta,
             ask_ratio=ask_ratio,
             underlying=meta.get('underlying', '/ES'),
-            macro_context=self._get_macro(),
+            macro_context=macro,
             schwab_enrichment=schwab_line,
             open_interest=oi,
         )
@@ -679,7 +680,7 @@ class TastyAlertSystem:
             iv=meta.get('iv', 0.0),
             bid=bid,
             ask=ask,
-            macro_context=self._get_macro(),
+            macro_context=macro,
             dte=(expiry - date.today()).days if expiry else 0,
             open_interest=oi,
         ))
@@ -691,13 +692,14 @@ class TastyAlertSystem:
         delta     = self.tracker.get_all_meta().get(symbol, {}).get('delta', 0.0)
         expiry    = meta.get('expiry_date', date.today())
         oi        = self._oi_snapshot.get(symbol, 0)
+        macro     = self._get_macro()
         await tg.send_block_accum(
             direction=direction, strike=meta.get('strike', 0.0),
             expiry_date=expiry,
             bid=bid, ask=ask, delta=delta,
             iv=meta.get('iv', 0.0), vol_30s=vol_30s, ask_ratio=ask_ratio,
             underlying=meta.get('underlying', '/ES'),
-            macro_context=self._get_macro(),
+            macro_context=macro,
             schwab_enrichment=self._get_schwab_enrichment(symbol),
             open_interest=oi,
         )
@@ -713,12 +715,13 @@ class TastyAlertSystem:
             iv=meta.get('iv', 0.0),
             bid=bid,
             ask=ask,
-            macro_context=self._get_macro(),
+            macro_context=macro,
             dte=(expiry - date.today()).days if expiry else 0,
             open_interest=oi,
         ))
 
     async def _send_sweep_burst(self, direction: str, group: list[tuple]) -> None:
+        macro        = self._get_macro()
         tracker_meta = self.tracker.get_all_meta()
         contracts, expiry_date = [], None
         for item in group:
@@ -750,7 +753,7 @@ class TastyAlertSystem:
             direction=direction, contracts=contracts,
             expiry_date=expiry_date or date.today(),
             underlying=sweep_underlying,
-            macro_context=self._get_macro(),
+            macro_context=macro,
             schwab_enrichment_lines=[c.get('schwab_enrichment', '') for c in contracts],
         )
         if contracts:
@@ -768,7 +771,7 @@ class TastyAlertSystem:
                 iv=top.get('iv', 0.0),
                 bid=top.get('bid', 0.0),
                 ask=top.get('ask', 0.0),
-                macro_context=self._get_macro(),
+                macro_context=macro,
                 dte=(exp - date.today()).days,
             ))
 
@@ -779,6 +782,7 @@ class TastyAlertSystem:
         mark      = (bid + ask) / 2.0 if (bid + ask) > 0 else 0.0
         delta     = self.tracker.get_all_meta().get(symbol, {}).get('delta', 0.0)
         expiry    = meta.get('expiry_date', date.today())
+        macro     = self._get_macro()
         await tg.send_pressure_cooker(
             minutes=minutes, direction=direction, strike=meta.get('strike', 0.0),
             expiry_date=expiry,
@@ -786,7 +790,7 @@ class TastyAlertSystem:
             iv=meta.get('iv', 0.0), vol_accumulated=vol_accumulated,
             tape=tape,
             underlying=meta.get('underlying', '/ES'),
-            macro_context=self._get_macro(),
+            macro_context=macro,
             schwab_enrichment=self._get_schwab_enrichment(symbol),
         )
         store.push(AlertRecord(
@@ -801,7 +805,7 @@ class TastyAlertSystem:
             iv=meta.get('iv', 0.0),
             bid=bid,
             ask=ask,
-            macro_context=self._get_macro(),
+            macro_context=macro,
             dte=(expiry - date.today()).days if expiry else 0,
         ))
 

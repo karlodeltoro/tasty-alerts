@@ -21,6 +21,28 @@ from tastytrade.dxfeed import Greeks, Quote, Summary, TimeAndSale, Trade, Underl
 from tastytrade.instruments import Future, NestedFutureOptionChain
 from tastytrade.session import Session
 
+# TimeAndSale.exchange_sale_conditions is typed `str` but the server sends None.
+# Pydantic v2 raises ValidationError → from_stream() silently drops every event.
+# Patch from_stream to replace None→'' for str fields before Pydantic validation.
+_tas_size = len(TimeAndSale.model_fields)
+_tas_str_pos = frozenset(
+    i for i, (_, f) in enumerate(TimeAndSale.model_fields.items())
+    if f.annotation is str
+)
+_tas_orig_from_stream = TimeAndSale.from_stream.__func__
+
+
+@classmethod  # type: ignore[misc]
+def _tas_patched_from_stream(cls, data: list) -> list:
+    patched = [
+        '' if (idx % _tas_size) in _tas_str_pos and v is None else v
+        for idx, v in enumerate(data)
+    ]
+    return _tas_orig_from_stream(cls, patched)
+
+
+TimeAndSale.from_stream = _tas_patched_from_stream
+
 import config
 from . import telegram_notifier as tg
 from .alert_engine import BlockAccumulatorEngine, BlockPrintEngine, PressureCookerEngine, SweepBurstEngine

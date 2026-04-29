@@ -8,7 +8,7 @@
     <key>ProgramArguments</key>
     <array>
         <string>/Users/karlo.deltoro/Desktop/tasty-alerts/venv/bin/python</string>
-        <string>/Users/karlo.deltoro/Desktop/tasty-alerts/scripts/auto_renew.py</string>
+        <string>/Users/karlo.deltoro/Desktop/tasty-alerts/scripts/auto_renew_all.py</string>
     </array>
 
     <key>StartInterval</key>

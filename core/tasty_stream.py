@@ -982,7 +982,7 @@ class TastyAlertSystem:
                     f"TT_SESSION_JSON expirado ({session.session_expiration}) "
                     "— intentando auto-renovación con remember_token..."
                 )
-                import renew_session as _rs
+                from auth import renew_session as _rs
                 if _rs.renew():
                     new_b64 = os.getenv("TT_SESSION_JSON")
                     new_session = Session.deserialize(base64.b64decode(new_b64).decode())

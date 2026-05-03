@@ -317,7 +317,7 @@ async def send_pressure_cooker(
     label   = f"{int(strike)}{dot}"
     exp_str = expiry_date.strftime("%-d %b %Y")
     now_hms = datetime.now(_ET).strftime("%H:%M:%S")
-    title   = f"🔥 PRESSURE COOKER  {label}  {underlying}  {vol_accumulated} vol  {minutes}m"
+    title   = f"🔥 PRESSURE COOKER  {label}  {direction}  {underlying}  {vol_accumulated} vol  {minutes}m"
 
     def _side(price):
         if price <= bid: return "BID"
@@ -327,7 +327,7 @@ async def send_pressure_cooker(
     if tape:
         tape_lines = "\n".join(
             f"{ts.strftime('%H:%M:%S')}    {size} @ ${price:.2f}  {_side(price)}"
-            for ts, size, price in tape[-10:]
+            for ts, size, price in tape
         )
     else:
         tape_lines = "Sin datos de tape"

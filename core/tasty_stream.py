@@ -684,6 +684,19 @@ class TastyAlertSystem:
         t = datetime.now(_ET).time()
         return dtime(9, 1) <= t <= dtime(17, 59)
 
+    def _is_futures_active(self) -> bool:
+        from datetime import time as dtime
+        now = datetime.now(_ET)
+        wd = now.weekday()  # 0=Mon, 6=Sun
+        t = now.time()
+        if wd == 4 and t >= dtime(17, 0):  # Friday after 5pm
+            return False
+        if wd == 5:                         # Saturday all day
+            return False
+        if wd == 6 and t < dtime(18, 0):   # Sunday before 6pm
+            return False
+        return True
+
     async def _send_raw_alert(self, direction, strike, expiry, vol_1min, mark, underlying: str = "/ES"):
         await tg.send_raw_alert(direction, strike, expiry, vol_1min, mark, underlying=underlying)
 
@@ -915,20 +928,19 @@ class TastyAlertSystem:
     # ─────────────────────────────────────────────────────────────
 
     async def _stream_watchdog(self) -> None:
-        """Detect silent WebSocket freeze (+0 trades/min during market hours) and cancel run_session."""
+        """Detect silent WebSocket freeze (+0 quotes/min during futures hours) and cancel run_session."""
         last_seen_count = 0
         frozen_since: datetime | None = None
 
         while True:
             await asyncio.sleep(config.WATCHDOG_CHECK_INTERVAL)
 
-            if not self._is_market_hours() or not self._active_symbols:
+            if not self._is_futures_active() or not self._active_symbols:
                 frozen_since = None
-                last_seen_count = self._trade_count
                 continue
 
-            if self._trade_count > last_seen_count:
-                last_seen_count = self._trade_count
+            if self._quote_count > last_seen_count:
+                last_seen_count = self._quote_count
                 frozen_since = None
             else:
                 now = _now()
@@ -937,7 +949,7 @@ class TastyAlertSystem:
                 elif (now - frozen_since).total_seconds() >= config.WATCHDOG_FREEZE_SECONDS:
                     frozen_s = (now - frozen_since).total_seconds()
                     logger.warning(
-                        f"[WATCHDOG] {frozen_s:.0f}s sin trades en horario de mercado "
+                        f"[WATCHDOG] {frozen_s:.0f}s sin quotes en horario de futuros "
                         f"(contratos={len(self._active_symbols)}) — forzando reconexión"
                     )
                     frozen_since = None

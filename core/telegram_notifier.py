@@ -295,7 +295,6 @@ async def send_block_accum(
 
 
 async def send_pressure_cooker(
-    minutes: int,
     direction: str,
     strike: float,
     expiry_date: date,
@@ -305,45 +304,66 @@ async def send_pressure_cooker(
     delta: float,
     iv: float,
     vol_accumulated: int,
-    tape: list,
-    underlying: str = "/ES",
+    minutes: int,
+    analytics: dict,
     macro_context: str = "",
-    schwab_enrichment: str = "",
+    underlying: str = "/ES",
+    open_interest: int = 0,
 ) -> bool:
-    """Envía alerta de Pressure Cooker a Telegram."""
+    """Envía alerta de Pressure Cooker a Telegram con flujo institucional analizado."""
     dte     = (expiry_date - date.today()).days
     iv_pct  = int(round(iv * 100))
     dot     = "🟢" if direction == "CALL" else "🔴"
-    label   = f"{int(strike)}{dot}"
     exp_str = expiry_date.strftime("%-d %b %Y")
     now_hms = datetime.now(_ET).strftime("%H:%M:%S")
-    title   = f"🔥 PRESSURE COOKER  {label}  {direction}  {underlying}  {vol_accumulated} vol  {minutes}m"
 
-    def _side(price):
-        if price <= bid: return "BID"
-        if price >= ask: return "ASK"
-        return "MID"
+    title = (
+        f"🔥 PRESSURE COOKER\n"
+        f"{int(strike)}{dot}  {direction}  {underlying}  "
+        f"{vol_accumulated} contracts  {minutes}m"
+    )
 
-    if tape:
-        tape_lines = "\n".join(
-            f"{ts.strftime('%H:%M:%S')}    {size} @ ${price:.2f}  {_side(price)}"
-            for ts, size, price in tape
-        )
-    else:
-        tape_lines = "Sin datos de tape"
+    ask_n   = analytics.get('ask_contracts', 0)
+    bid_n   = analytics.get('bid_contracts', 0)
+    mid_n   = analytics.get('mid_contracts', 0)
+    ask_pct = analytics.get('ask_pct', 0.0)
+    bid_pct = analytics.get('bid_pct', 0.0)
+    mid_pct = analytics.get('mid_pct', 0.0)
 
-    schwab_line = f"{schwab_enrichment}\n" if schwab_enrichment else ""
-    macro_line  = f"{macro_context}\n" if macro_context else ""
+    num_executions     = analytics.get('num_executions', 0)
+    largest_size       = analytics.get('largest_print_size', 0)
+    largest_price      = analytics.get('largest_print_price', 0.0)
+    avg_exec_size      = analytics.get('avg_exec_size', 0.0)
+    vwap               = analytics.get('vwap', 0.0)
+    price_high         = analytics.get('price_high', 0.0)
+    price_low          = analytics.get('price_low', 0.0)
+    aggression_label   = analytics.get('aggression_label', 'NEUTRAL')
+    price_trend        = analytics.get('price_trend', 'STABLE')
+
+    macro_line = f"{macro_context}\n" if macro_context else ""
+    oi_str     = f"  |  OI {open_interest:,}" if open_interest > 0 else ""
+
     text = (
         f"*{title}*\n"
         f"\n"
-        f"{exp_str}  |  {dte} DTE  |  Δ {abs(delta):.2f}  |  IV {iv_pct}%\n"
+        f"{exp_str}  |  {dte} DTE  |  Δ {abs(delta):.2f}  |  IV {iv_pct}%{oi_str}\n"
+        f"\n"
+        f"Flow Summary\n"
         f"{_SEP}\n"
-        f"Tape  {minutes}m\n"
-        f"{tape_lines}\n"
-        f"{_SEP}\n"
-        f"Total  {vol_accumulated} contratos\n"
-        f"{schwab_line}"
+        f"ASK  {ask_n} ({ask_pct:.0f}%)\n"
+        f"BID  {bid_n} ({bid_pct:.0f}%)\n"
+        f"MID  {mid_n} ({mid_pct:.0f}%)\n"
+        f"\n"
+        f"Executions: {num_executions}\n"
+        f"Largest: {largest_size} @ ${largest_price:.2f}\n"
+        f"Avg size: {avg_exec_size:.1f}\n"
+        f"\n"
+        f"Range: ${price_low:.2f} → ${price_high:.2f}\n"
+        f"VWAP: ${vwap:.2f}\n"
+        f"\n"
+        f"Aggression: {aggression_label}\n"
+        f"Trend: {price_trend}\n"
+        f"\n"
         f"{macro_line}"
         f"{now_hms} ET  |  via BullCore"
     )
@@ -354,7 +374,8 @@ async def send_pressure_cooker(
     if ok:
         logger.info(
             f"Telegram PRESSURE COOKER {minutes}min OK: "
-            f"{direction} strike {int(strike)} vol {vol_accumulated}"
+            f"{direction} strike {int(strike)} vol {vol_accumulated} "
+            f"agg={aggression_label}"
         )
     return ok
 

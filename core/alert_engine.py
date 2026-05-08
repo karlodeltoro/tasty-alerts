@@ -25,6 +25,169 @@ def _now() -> datetime:
     return datetime.now(_ET)
 
 
+def compute_pc_analytics(fills: list[dict]) -> dict:
+    """
+    Compute Pressure Cooker analytics from raw per-fill data.
+
+    fills: list of dicts with keys size, exec_price, bid_price, ask_price,
+    aggressor_side, timestamp. Fills are NEVER averaged before computing —
+    each fill contributes individually.
+
+    Returns a dict with the schema documented in the redesign spec.
+    """
+    if not fills:
+        return {
+            'total_contracts':     0,
+            'ask_contracts':       0,
+            'bid_contracts':       0,
+            'mid_contracts':       0,
+            'ask_pct':             0.0,
+            'bid_pct':             0.0,
+            'mid_pct':             0.0,
+            'num_executions':      0,
+            'largest_print_size':  0,
+            'largest_print_price': 0.0,
+            'avg_exec_size':       0.0,
+            'vwap':                0.0,
+            'price_high':          0.0,
+            'price_low':           0.0,
+            'aggression_score':    0,
+            'aggression_label':    'NEUTRAL',
+            'price_trend':         'STABLE',
+        }
+
+    total_contracts = 0
+    ask_contracts   = 0
+    bid_contracts   = 0
+    mid_contracts   = 0
+    largest_size    = 0
+    largest_price   = 0.0
+    notional_sum    = 0.0
+    price_high      = float('-inf')
+    price_low       = float('inf')
+
+    for f in fills:
+        size = int(f.get('size', 0))
+        if size <= 0:
+            continue
+        exec_price = float(f.get('exec_price', 0.0))
+        bid        = float(f.get('bid_price', 0.0))
+        ask        = float(f.get('ask_price', 0.0))
+        agg        = f.get('aggressor_side', 'UNDEFINED')
+
+        total_contracts += size
+        notional_sum    += exec_price * size
+
+        if agg == 'BUY':
+            ask_contracts += size
+        elif agg == 'SELL':
+            bid_contracts += size
+        else:
+            # Fallback when aggressor missing: classify by price vs NBBO.
+            if ask > 0 and exec_price >= ask:
+                ask_contracts += size
+            elif bid > 0 and exec_price <= bid:
+                bid_contracts += size
+            else:
+                mid_contracts += size
+
+        if size > largest_size:
+            largest_size  = size
+            largest_price = exec_price
+
+        if exec_price > price_high:
+            price_high = exec_price
+        if exec_price < price_low:
+            price_low = exec_price
+
+    num_executions = len(fills)
+    avg_exec_size  = total_contracts / num_executions if num_executions else 0.0
+    vwap           = notional_sum / total_contracts if total_contracts else 0.0
+    if price_high == float('-inf'):
+        price_high = 0.0
+    if price_low == float('inf'):
+        price_low = 0.0
+
+    if total_contracts > 0:
+        ask_pct = 100.0 * ask_contracts / total_contracts
+        bid_pct = 100.0 * bid_contracts / total_contracts
+        mid_pct = 100.0 * mid_contracts / total_contracts
+    else:
+        ask_pct = bid_pct = mid_pct = 0.0
+
+    # Price trend: avg of first half vs second half by execution order.
+    half = num_executions // 2
+    if num_executions >= 2 and half > 0:
+        first_half  = fills[:half]
+        second_half = fills[half:]
+        avg_first  = sum(float(x.get('exec_price', 0.0)) for x in first_half)  / len(first_half)
+        avg_second = sum(float(x.get('exec_price', 0.0)) for x in second_half) / len(second_half)
+        rising  = avg_second > avg_first
+        falling = avg_second < avg_first
+    else:
+        rising = falling = False
+
+    if rising and ask_pct > 60:
+        price_trend = 'RISING INTO BUYING'
+    elif falling and bid_pct > 60:
+        price_trend = 'FALLING INTO SELLING'
+    elif rising or falling:
+        price_trend = 'MIXED'
+    else:
+        price_trend = 'STABLE'
+
+    # Aggression score
+    base = ask_pct if ask_pct > bid_pct else (100.0 - bid_pct)
+    bonuses = 0
+    if largest_size >= 100:
+        bonuses += 10
+    if price_trend in ('RISING INTO BUYING', 'FALLING INTO SELLING'):
+        bonuses += 10
+    if num_executions >= 10:
+        bonuses += 5
+    score = min(100, int(base + bonuses))
+
+    # Aggression label — direction comes from whichever side dominates.
+    if ask_pct >= bid_pct:
+        if score >= 90:
+            label = 'EXTREME ASK BUYING'
+        elif score >= 75:
+            label = 'HIGH ASK BUYING'
+        elif score >= 60:
+            label = 'MODERATE ASK BUYING'
+        else:
+            label = 'NEUTRAL'
+    else:
+        if score >= 90:
+            label = 'EXTREME BID SELLING'
+        elif score >= 75:
+            label = 'HIGH BID SELLING'
+        elif score >= 60:
+            label = 'MODERATE BID SELLING'
+        else:
+            label = 'NEUTRAL'
+
+    return {
+        'total_contracts':     total_contracts,
+        'ask_contracts':       ask_contracts,
+        'bid_contracts':       bid_contracts,
+        'mid_contracts':       mid_contracts,
+        'ask_pct':             ask_pct,
+        'bid_pct':             bid_pct,
+        'mid_pct':             mid_pct,
+        'num_executions':      num_executions,
+        'largest_print_size':  largest_size,
+        'largest_print_price': largest_price,
+        'avg_exec_size':       avg_exec_size,
+        'vwap':                vwap,
+        'price_high':          price_high,
+        'price_low':           price_low,
+        'aggression_score':    score,
+        'aggression_label':    label,
+        'price_trend':         price_trend,
+    }
+
+
 class SweepBurstEngine:
     def __init__(self) -> None:
         # direction ("CALL" o "PUT") → último datetime de alerta

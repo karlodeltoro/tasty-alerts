@@ -41,6 +41,9 @@ class VolumeTracker:
         self._q30:    dict[str, deque] = defaultdict(deque)  # 30-second window
         self._q1_ask: dict[str, deque] = defaultdict(deque)  # solo trades en el ask
         self._q2_agg: dict[str, deque] = defaultdict(deque)  # 2-min aggressive (at/above ask)
+        # Pressure Cooker fill log — full per-fill detail for analytics.
+        # Each entry: dict with keys timestamp, size, exec_price, bid_price, ask_price, aggressor_side.
+        self._pc_fills: dict[str, deque] = defaultdict(deque)
         self._meta:   dict[str, dict]  = {}
 
     def register(self, symbol: str, underlying: str, contract_type: str, delta: float) -> None:
@@ -53,14 +56,16 @@ class VolumeTracker:
 
     def add_trade(
         self, symbol: str, size: int, price: float = 0.0,
-        is_ask: bool = False, ask_price: float = 0.0
+        is_ask: bool = False, ask_price: float = 0.0,
+        bid_price: float = 0.0, aggressor_side: str = 'UNDEFINED',
     ) -> "TrackResult | None":
         """
         Registra un trade individual del WebSocket (event-driven).
         A diferencia de update(), no calcula delta vs total — recibe el tamaño
         real del trade directamente del exchange.
         is_ask=True cuando trade.price >= ask del contrato en ese momento.
-        ask_price: current ask for above-ask aggressive detection.
+        ask_price / bid_price: NBBO at fill time.
+        aggressor_side: 'BUY' (lifted ask), 'SELL' (hit bid), or 'UNDEFINED'.
         """
         if symbol not in self._meta:
             return None
@@ -80,6 +85,16 @@ class VolumeTracker:
         if is_aggressive:
             self._q2_agg[symbol].append(event)
 
+        # PC fill log — full per-fill detail, never averaged.
+        self._pc_fills[symbol].append({
+            'timestamp':      now,
+            'size':           int(size),
+            'exec_price':     float(price),
+            'bid_price':      float(bid_price),
+            'ask_price':      float(ask_price),
+            'aggressor_side': aggressor_side if aggressor_side in ('BUY', 'SELL') else 'UNDEFINED',
+        })
+
         cutoff1  = now - timedelta(seconds=60)
         cutoff5  = now - timedelta(seconds=300)
         cutoff30 = now - timedelta(seconds=30)
@@ -89,6 +104,7 @@ class VolumeTracker:
         _trim(self._q30[symbol],   cutoff30)
         _trim(self._q1_ask[symbol], cutoff1)
         _trim(self._q2_agg[symbol], cutoff2a)
+        _trim_dict(self._pc_fills[symbol], cutoff5)
 
         meta = self._meta[symbol]
         return TrackResult(
@@ -216,6 +232,19 @@ class VolumeTracker:
             return []
         return [e for e in q if e[0] >= cutoff]
 
+    def get_pc_fills(self, symbol: str, window_seconds: int) -> list[dict]:
+        """
+        Returns PC fills within window with full per-fill detail.
+        Each dict: timestamp, size, exec_price, bid_price, ask_price, aggressor_side.
+        Never averages or merges — analytics consumers see raw fills.
+        """
+        now = datetime.now(_ET)
+        cutoff = now - timedelta(seconds=window_seconds)
+        q = self._pc_fills.get(symbol)
+        if not q:
+            return []
+        return [f for f in q if f['timestamp'] >= cutoff]
+
     def update_delta(self, symbol: str, delta: float) -> None:
         if symbol in self._meta:
             self._meta[symbol]['delta'] = delta
@@ -230,9 +259,15 @@ class VolumeTracker:
         self._q30.clear()
         self._q1_ask.clear()
         self._q2_agg.clear()
+        self._pc_fills.clear()
         self._meta.clear()
 
 
 def _trim(q: deque, cutoff: datetime) -> None:
     while q and q[0][0] < cutoff:
+        q.popleft()
+
+
+def _trim_dict(q: deque, cutoff: datetime) -> None:
+    while q and q[0]['timestamp'] < cutoff:
         q.popleft()

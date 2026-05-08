@@ -45,7 +45,13 @@ TimeAndSale.from_stream = _tas_patched_from_stream
 
 import config
 from . import telegram_notifier as tg
-from .alert_engine import BlockAccumulatorEngine, BlockPrintEngine, PressureCookerEngine, SweepBurstEngine
+from .alert_engine import (
+    BlockAccumulatorEngine,
+    BlockPrintEngine,
+    PressureCookerEngine,
+    SweepBurstEngine,
+    compute_pc_analytics,
+)
 from .alert_store import store, AlertRecord
 from schwab.schwab_stream import MacroContext, SchwabMacroStream
 from .volume_tracker import VolumeTracker
@@ -349,7 +355,10 @@ class TastyAlertSystem:
     # Core trade processing
     # ─────────────────────────────────────────────────────────────
 
-    def _process_trade(self, sym: str, size: int, price: float, is_ask: bool, meta: dict) -> None:
+    def _process_trade(
+        self, sym: str, size: int, price: float, is_ask: bool, meta: dict,
+        aggressor_side: str = 'UNDEFINED',
+    ) -> None:
         """Process a single validated trade through engines."""
         bid  = meta.get('bid', 0.0)
         ask  = meta.get('ask', 0.0)
@@ -364,7 +373,14 @@ class TastyAlertSystem:
         meta['last_trade_bid']   = bid   # snapshot at trade time — prevents stale-quote mismatch
         meta['last_trade_ask']   = ask
         ask_price = meta.get('ask', 0.0)
-        result = self.tracker.add_trade(sym, size, price, is_ask=is_ask, ask_price=ask_price)
+        bid_price = meta.get('bid', 0.0)
+        result = self.tracker.add_trade(
+            sym, size, price,
+            is_ask=is_ask,
+            ask_price=ask_price,
+            bid_price=bid_price,
+            aggressor_side=aggressor_side,
+        )
         if not result:
             return
 
@@ -497,7 +513,9 @@ class TastyAlertSystem:
                 continue
 
             # aggressor_side='BUY' means buyer hit the ask
-            is_ask = event.aggressor_side == 'BUY'
+            raw_agg = getattr(event, 'aggressor_side', None)
+            agg_side = raw_agg if raw_agg in ('BUY', 'SELL') else 'UNDEFINED'
+            is_ask = agg_side == 'BUY'
             trade_price = float(event.price or 0.0)
 
             if self._reloading:
@@ -512,7 +530,7 @@ class TastyAlertSystem:
             if event_bid > 0.0 or event_ask > 0.0:
                 meta['bid'] = event_bid
                 meta['ask'] = event_ask
-                self._process_trade(sym, int(size), trade_price, is_ask, meta)
+                self._process_trade(sym, int(size), trade_price, is_ask, meta, aggressor_side=agg_side)
             else:
                 # No bid/ask in T&S event — fall back to quote cache
                 bid = meta.get('bid', 0.0)
@@ -523,13 +541,13 @@ class TastyAlertSystem:
                             f"[LARGE_TRADE_BYPASS] {sym} size={size} — "
                             f"no T&S bid/ask, bypassing queue"
                         )
-                        self._process_trade(sym, int(size), trade_price, is_ask, meta)
+                        self._process_trade(sym, int(size), trade_price, is_ask, meta, aggressor_side=agg_side)
                     else:
                         self._discarded_no_quote += 1
                         logger.debug(f"[PENDING] queued T&S {sym} size={size} — no bid/ask")
                         self._enqueue_pending(sym, int(size), trade_price, is_ask)
                 else:
-                    self._process_trade(sym, int(size), trade_price, is_ask, meta)
+                    self._process_trade(sym, int(size), trade_price, is_ask, meta, aggressor_side=agg_side)
 
     async def _handle_quotes(self, streamer: DXLinkStreamer) -> None:
         async for quote in streamer.listen(Quote):
@@ -619,13 +637,11 @@ class TastyAlertSystem:
 
                 fire_2 = self.pc_engine.check_2min(sym, vol_2min, delta)
                 if fire_2:
-                    tape = self.tracker.get_tape(sym, 120)
-                    asyncio.create_task(self._send_pressure_cooker(sym, vol_2min, 2, tape))
+                    asyncio.create_task(self._send_pressure_cooker(sym, vol_2min, 2))
 
                 fire_5 = self.pc_engine.check_5min(sym, vol_5min, delta)
                 if fire_5:
-                    tape = self.tracker.get_tape(sym, 300)
-                    asyncio.create_task(self._send_pressure_cooker(sym, vol_5min, 5, tape))
+                    asyncio.create_task(self._send_pressure_cooker(sym, vol_5min, 5))
 
             # Check Schwab contract candidates → confirm with TT T&S
             if self._macro_stream and not config.RAW_ALERT_MODE:
@@ -830,7 +846,7 @@ class TastyAlertSystem:
                 dte=(exp - date.today()).days,
             ))
 
-    async def _send_pressure_cooker(self, symbol: str, vol_accumulated: int, minutes: int, tape: list) -> None:
+    async def _send_pressure_cooker(self, symbol: str, vol_accumulated: int, minutes: int) -> None:
         meta      = self._contract_meta.get(symbol, {})
         direction = 'CALL' if meta.get('is_call') else 'PUT'
         bid, ask  = meta.get('bid', 0.0), meta.get('ask', 0.0)
@@ -838,15 +854,21 @@ class TastyAlertSystem:
         delta     = self.tracker.get_all_meta().get(symbol, {}).get('delta', 0.0)
         expiry    = meta.get('expiry_date', date.today())
         macro     = self._get_macro()
+        oi        = self._oi_snapshot.get(symbol, 0)
+
+        window_seconds = minutes * 60
+        fills     = self.tracker.get_pc_fills(symbol, window_seconds)
+        analytics = compute_pc_analytics(fills)
+
         await tg.send_pressure_cooker(
             minutes=minutes, direction=direction, strike=meta.get('strike', 0.0),
             expiry_date=expiry,
             bid=bid, ask=ask, last_price=mark, delta=delta,
             iv=meta.get('iv', 0.0), vol_accumulated=vol_accumulated,
-            tape=tape,
+            analytics=analytics,
             underlying=meta.get('underlying', '/ES'),
             macro_context=macro,
-            schwab_enrichment=self._get_schwab_enrichment(symbol),
+            open_interest=oi,
         )
         store.push(AlertRecord(
             alert_type="PRESSURE_COOKER",
@@ -855,13 +877,19 @@ class TastyAlertSystem:
             strike=meta.get('strike', 0.0),
             expiry_date=str(expiry),
             vol=vol_accumulated,
-            ask_ratio=0.0,
+            ask_ratio=analytics['ask_pct'] / 100.0,
             delta=delta,
             iv=meta.get('iv', 0.0),
             bid=bid,
             ask=ask,
             macro_context=macro,
             dte=(expiry - date.today()).days if expiry else 0,
+            open_interest=oi,
+            aggression_score=analytics['aggression_score'],
+            aggression_label=analytics['aggression_label'],
+            ask_pct=analytics['ask_pct'],
+            bid_pct=analytics['bid_pct'],
+            vwap=analytics['vwap'],
         ))
 
     def _find_tt_symbol_for_strike(

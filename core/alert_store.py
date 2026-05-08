@@ -30,6 +30,11 @@ class AlertRecord:
     timestamp: str = field(default_factory=lambda: datetime.now(_ET).isoformat())
     dte: int = 0
     open_interest: int = 0
+    aggression_score: int = 0
+    aggression_label: str = ""
+    ask_pct: float = 0.0
+    bid_pct: float = 0.0
+    vwap: float = 0.0
 
 
 class AlertStore:

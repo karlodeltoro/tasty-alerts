@@ -277,11 +277,14 @@ async def main() -> None:
             break
 
         # ── Reconexión con backoff ────────────────────────────────
-        logger.info("Renovando sesión antes de reconectar...")
-        try:
-            renew_session.renew()
-        except Exception as re_err:
-            logger.error(f"Fallo al renovar sesión pre-reconexión: {re_err}")
+        if config.RAILWAY_RENEW_ENABLED:
+            logger.info("Renovando sesión antes de reconectar...")
+            try:
+                renew_session.renew()
+            except Exception as re_err:
+                logger.error(f"Fallo al renovar sesión pre-reconexión: {re_err}")
+        else:
+            logger.info("RAILWAY_RENEW_ENABLED=false — skipping session renewal on reconnect")
 
         logger.info(f"Reconectando en {retry_delay}s...")
         try:

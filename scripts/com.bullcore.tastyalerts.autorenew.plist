@@ -22,5 +22,8 @@
 
     <key>StandardErrorPath</key>
     <string>/Users/karlo.deltoro/Library/Logs/tasty-alerts-autorenew-error.log</string>
+
+    <key>NetworkReachability</key>
+    <string>google.com</string>
 </dict>
 </plist>

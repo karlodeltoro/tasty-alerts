@@ -25,13 +25,23 @@ from __future__ import annotations
 import base64
 import logging
 import os
+import socket
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import httpx
 from dotenv import load_dotenv
 from tastytrade.session import Session
+
+_NETWORK_RETRY_DELAYS = [30, 60, 120]
+
+
+def _is_network_error(e: BaseException) -> bool:
+    if isinstance(e, (ConnectionError, socket.gaierror)):
+        return True
+    return "nodename" in str(e)
 
 _SCRIPT_DIR = Path(__file__).parent
 load_dotenv(_SCRIPT_DIR / ".env")
@@ -83,41 +93,58 @@ def _services(serialized: str, session: Session) -> list[dict]:
 # ── Railway update ────────────────────────────────────────────────────────────
 
 def _update_railway(svc: dict) -> tuple[str, bool, str]:
-    """Push one variable update to Railway. Returns (label, ok, error_msg)."""
+    """Push one variable update to Railway. Returns (label, ok, error_msg).
+
+    Retries up to 3 times with 30s/60s/120s backoff on network/DNS errors only.
+    """
     label = svc["label"]
     missing = [k for k in ("api_token", "project_id", "service_id", "environment_id")
                if not svc.get(k)]
     if missing:
         return label, False, f"missing env vars: {missing}"
-    try:
-        resp = httpx.post(
-            _RAILWAY_API,
-            headers={
-                "Authorization": f"Bearer {svc['api_token']}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "query": _MUTATION,
-                "variables": {
-                    "input": {
-                        "projectId":     svc["project_id"],
-                        "serviceId":     svc["service_id"],
-                        "environmentId": svc["environment_id"],
-                        "name":          svc["var_name"],
-                        "value":         svc["value"],
-                    }
+
+    attempts = len(_NETWORK_RETRY_DELAYS) + 1
+    last_err = ""
+    for attempt in range(1, attempts + 1):
+        try:
+            resp = httpx.post(
+                _RAILWAY_API,
+                headers={
+                    "Authorization": f"Bearer {svc['api_token']}",
+                    "Content-Type": "application/json",
                 },
-            },
-            timeout=30,
-        )
-        resp.raise_for_status()
-        result = resp.json()
-        if result.get("errors"):
-            return label, False, str(result["errors"])
-        logger.info(f"[{label}] {svc['var_name']} updated on Railway.")
-        return label, True, ""
-    except Exception as e:
-        return label, False, str(e)
+                json={
+                    "query": _MUTATION,
+                    "variables": {
+                        "input": {
+                            "projectId":     svc["project_id"],
+                            "serviceId":     svc["service_id"],
+                            "environmentId": svc["environment_id"],
+                            "name":          svc["var_name"],
+                            "value":         svc["value"],
+                        }
+                    },
+                },
+                timeout=30,
+            )
+            resp.raise_for_status()
+            result = resp.json()
+            if result.get("errors"):
+                return label, False, str(result["errors"])
+            logger.info(f"[{label}] {svc['var_name']} updated on Railway.")
+            return label, True, ""
+        except Exception as e:
+            last_err = str(e)
+            if _is_network_error(e) and attempt <= len(_NETWORK_RETRY_DELAYS):
+                delay = _NETWORK_RETRY_DELAYS[attempt - 1]
+                logger.warning(
+                    f"[{label}] network error on attempt {attempt}/{attempts}: {e} "
+                    f"— retrying in {delay}s"
+                )
+                time.sleep(delay)
+                continue
+            return label, False, last_err
+    return label, False, f"network error after {attempts} attempts: {last_err}"
 
 
 # ── Schwab token push ────────────────────────────────────────────────────────
@@ -161,14 +188,27 @@ def _tg(text: str) -> None:
     if not bot_token or not chat_id:
         logger.warning("Telegram not configured — skipping notification.")
         return
-    try:
-        httpx.post(
-            f"https://api.telegram.org/bot{bot_token}/sendMessage",
-            json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"},
-            timeout=10,
-        )
-    except Exception as e:
-        logger.warning(f"Telegram send failed: {e}")
+
+    attempts = len(_NETWORK_RETRY_DELAYS) + 1
+    for attempt in range(1, attempts + 1):
+        try:
+            httpx.post(
+                f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"},
+                timeout=10,
+            )
+            return
+        except Exception as e:
+            if _is_network_error(e) and attempt <= len(_NETWORK_RETRY_DELAYS):
+                delay = _NETWORK_RETRY_DELAYS[attempt - 1]
+                logger.warning(
+                    f"Telegram network error on attempt {attempt}/{attempts}: {e} "
+                    f"— retrying in {delay}s"
+                )
+                time.sleep(delay)
+                continue
+            logger.warning(f"Telegram send failed: {e}")
+            return
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -183,14 +223,26 @@ def run() -> bool:
         return False
 
     # ── 1. Authenticate once ──────────────────────────────────────────────────
-    logger.info(f"Authenticating as {username}...")
-    try:
-        session = Session(login=username, password=password, remember_me=True)
-        logger.info("Login successful.")
-    except Exception as e:
-        logger.error(f"Authentication failed: {e}")
-        _tg(f"⚠️ *Universal TT renewal FAILED*\nAuth error: `{e}`")
-        return False
+    # Prefer the session.json written by login.py — re-auth from username/password
+    # triggers an OTP challenge whenever this Mac isn't device-trusted.
+    auth_session_file = _SCRIPT_DIR.parent / "auth" / "session.json"
+    session = None
+    if auth_session_file.exists():
+        try:
+            session = Session.deserialize(auth_session_file.read_text(encoding="utf-8"))
+            logger.info(f"Loaded session from {auth_session_file} (expires {session.session_expiration})")
+        except Exception as e:
+            logger.warning(f"Could not load {auth_session_file}: {e}")
+            session = None
+    if session is None:
+        logger.info(f"Authenticating as {username}...")
+        try:
+            session = Session(login=username, password=password, remember_me=True)
+            logger.info("Login successful.")
+        except Exception as e:
+            logger.error(f"Authentication failed: {e}")
+            _tg(f"⚠️ *Universal TT renewal FAILED*\nAuth error: `{e}`")
+            return False
 
     serialized = session.serialize()
     expiry     = session.session_expiration

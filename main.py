@@ -15,6 +15,7 @@ import asyncio
 import base64
 import json
 import logging
+import os
 import signal
 import sys
 from datetime import datetime, timedelta, timezone
@@ -23,6 +24,7 @@ from zoneinfo import ZoneInfo
 import uvicorn
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
+import api as _api
 import config
 import core.telegram_notifier as tg
 from api import app as fastapi_app
@@ -35,6 +37,12 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[logging.StreamHandler(sys.stdout)],
 )
+
+# Silence tastytrade SDK's per-message DEBUG dumps unless DEBUG_FEED is set.
+# Without this, every FEED_DATA quote burst (hundreds of symbols) hits Railway logs.
+if not os.getenv("DEBUG_FEED"):
+    logging.getLogger("tastytrade").setLevel(logging.WARNING)
+
 logger = logging.getLogger(__name__)
 ET = ZoneInfo("America/New_York")
 
@@ -83,6 +91,7 @@ def _expiry_watchdog() -> None:
 
 async def main() -> None:
     system = TastyAlertSystem()
+    _api.system = system  # expose to /health endpoint
 
     loop     = asyncio.get_running_loop()
     _stop    = asyncio.Event()

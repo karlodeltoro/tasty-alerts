@@ -41,15 +41,27 @@ class AlertStore:
     def __init__(self, maxlen: int = 50):
         self._q: deque[AlertRecord] = deque(maxlen=maxlen)
         self._lock = threading.Lock()
+        self._total_pushed: int = 0
 
     def push(self, record: AlertRecord) -> None:
         with self._lock:
             self._q.appendleft(record)
+            self._total_pushed += 1
 
     def recent(self, n: int = 20) -> list[dict]:
         with self._lock:
             items = list(self._q)[:n]
         return [asdict(r) for r in items]
+
+    def total_sent(self) -> int:
+        with self._lock:
+            return self._total_pushed
+
+    def latest(self) -> dict | None:
+        with self._lock:
+            if not self._q:
+                return None
+            return asdict(self._q[0])
 
     def clear(self) -> None:
         with self._lock:

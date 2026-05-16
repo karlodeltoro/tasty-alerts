@@ -83,6 +83,11 @@ class TastyAlertSystem:
         self._trade_count_last: int = 0
         self._quote_count_last: int = 0
         self._greeks_count_last: int = 0
+        # Last heartbeat snapshot (for /health endpoint)
+        self._trades_per_min: int = 0
+        self._quotes_per_min: int = 0
+        self._greeks_per_min: int = 0
+        self._last_heartbeat_at: datetime | None = None
         self._first_trade_logged: bool = False
         self._first_quote_logged: bool = False
         self._first_greeks_logged: bool = False
@@ -613,6 +618,10 @@ class TastyAlertSystem:
                 self._trade_count_last  = self._trade_count
                 self._quote_count_last  = self._quote_count
                 self._greeks_count_last = self._greeks_count
+                self._trades_per_min = trades_delta
+                self._quotes_per_min = quotes_delta
+                self._greeks_per_min = greeks_delta
+                self._last_heartbeat_at = datetime.now(_ET)
                 logger.info(
                     f"[HEARTBEAT] contratos={len(self._active_symbols)} | "
                     f"trades_total={self._trade_count} (+{trades_delta}/min) | "

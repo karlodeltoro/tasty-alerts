@@ -215,6 +215,7 @@ class SchwabMacroStream:
         self._option_symbols:  set[str]                    = set()  # currently subscribed
         self._candidates:      list[ContractCandidate]     = []
         self._active_client    = None                               # active stream_client ref
+        self._stream_task      = None                               # current _connect_and_stream() task (cancellable by watchdog)
         # Config thresholds (loaded from env at start)
         self._velocity_min_1m: float = 0.0
         self._vol_oi_min:      float = 0.0
@@ -235,9 +236,17 @@ class SchwabMacroStream:
     async def _run_forever(self) -> None:
         """Reconnect loop with exponential backoff. Never propagates exceptions."""
         delay = 5
+        # Spawn watchdog once — runs concurrently for the lifetime of the stream
+        asyncio.create_task(self._schwab_watchdog(), name="schwab_watchdog")
         while self._running:
             try:
-                await self._connect_and_stream()
+                self._stream_task = asyncio.create_task(self._connect_and_stream())
+                await self._stream_task
+            except asyncio.CancelledError:
+                logger.warning("[SCHWAB] Stream task cancelled by watchdog — reconnecting")
+                # context already set to STALE by watchdog
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 300)
             except Exception as e:
                 logger.warning(f"[SCHWAB] Stream error: {e} — reconnecting in {delay}s")
                 async with self._lock:
@@ -249,6 +258,24 @@ class SchwabMacroStream:
                 delay = min(delay * 2, 300)
             else:
                 delay = 5
+            finally:
+                self._stream_task = None
+
+    async def _schwab_watchdog(self) -> None:
+        STALE_SECONDS = 300  # 5 minutes
+        while True:
+            await asyncio.sleep(60)
+            if self._context.last_updated is None:
+                continue
+            age = (datetime.now(_ET) - self._context.last_updated).total_seconds()
+            if age > STALE_SECONDS:
+                logger.warning(f"[SCHWAB] No ticks in {age:.0f}s — forcing reconnect")
+                self._context = dataclasses.replace(
+                    self._context, stream_type="STALE"
+                )
+                # Cancel the stream task to trigger reconnect in _run_forever
+                if self._stream_task is not None:
+                    self._stream_task.cancel()
 
     async def _connect_and_stream(self) -> None:
         """Build client, subscribe, and stream until disconnect."""
@@ -289,13 +316,20 @@ class SchwabMacroStream:
         async with self._lock:
             self._context = dataclasses.replace(
                 self._context,
-                stream_type="LIVE",
-                last_updated=datetime.now(_ET),
+                stream_type="CONNECTING",
             )
 
-        # handle_message() processes one message per call — must loop until disconnect
+        # handle_message() processes one message per call — must loop until disconnect.
+        # wait_for adds a per-message timeout so a silent dead socket triggers reconnect.
         while True:
-            await stream_client.handle_message()
+            try:
+                await asyncio.wait_for(
+                    stream_client.handle_message(),
+                    timeout=120.0,
+                )
+            except asyncio.TimeoutError:
+                logger.warning("[SCHWAB] handle_message timeout — reconnecting")
+                raise  # triggers reconnect in _run_forever
         self._active_client = None
 
     def _handle_quote(self, msg: dict) -> None:

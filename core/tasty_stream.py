@@ -517,6 +517,8 @@ class TastyAlertSystem:
                 logger.debug(f"[DROP:ZERO_SIZE] {sym}")
                 continue
 
+            logger.info(f"[T&S] {event.event_symbol} | size={event.size} price={event.price} aggressor={event.aggressor_side} bid={event.bid_price} ask={event.ask_price}")
+
             # aggressor_side='BUY' means buyer hit the ask
             raw_agg = getattr(event, 'aggressor_side', None)
             agg_side = raw_agg if raw_agg in ('BUY', 'SELL') else 'UNDEFINED'

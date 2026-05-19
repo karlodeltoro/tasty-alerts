@@ -53,6 +53,7 @@ from .alert_engine import (
     compute_pc_analytics,
 )
 from .alert_store import store, AlertRecord
+from schwab.symbol_mapper import tt_meta_to_schwab_symbol
 from schwab.schwab_stream import MacroContext, SchwabMacroStream
 from .volume_tracker import VolumeTracker
 
@@ -306,7 +307,6 @@ class TastyAlertSystem:
 
         # Subscribe option contracts to Schwab monitor
         if self._macro_stream is not None and all_symbols:
-            from schwab.symbol_mapper import tt_meta_to_schwab_symbol
             schwab_syms = []
             for sym in all_symbols:
                 meta = self._contract_meta.get(sym)
